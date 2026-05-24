@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "entries": {
+    "openai-codex/gpt-5.5": {
+      "provider": "openai-codex",
+      "id": "gpt-5.5",
+      "api": "openai-codex-responses",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "default"
+      ],
+      "unsupportedTiers": [
+        "flex",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:33:52.601Z"
+    },
+    "openai-codex/gpt-5.2": {
+      "provider": "openai-codex",
+      "id": "gpt-5.2",
+      "api": "openai-codex-responses",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "default"
+      ],
+      "unsupportedTiers": [
+        "flex",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:33:18.999Z"
+    },
+    "openai-codex/gpt-5.3-codex": {
+      "provider": "openai-codex",
+      "id": "gpt-5.3-codex",
+      "api": "openai-codex-responses",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "default"
+      ],
+      "unsupportedTiers": [
+        "flex",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:33:24.264Z"
+    },
+    "openai-codex/gpt-5.3-codex-spark": {
+      "provider": "openai-codex",
+      "id": "gpt-5.3-codex-spark",
+      "api": "openai-codex-responses",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "default"
+      ],
+      "unsupportedTiers": [
+        "flex",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:33:35.301Z"
+    },
+    "openai-codex/gpt-5.4": {
+      "provider": "openai-codex",
+      "id": "gpt-5.4",
+      "api": "openai-codex-responses",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "default"
+      ],
+      "unsupportedTiers": [
+        "flex",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:33:40.993Z"
+    },
+    "openai-codex/gpt-5.4-mini": {
+      "provider": "openai-codex",
+      "id": "gpt-5.4-mini",
+      "api": "openai-codex-responses",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "default"
+      ],
+      "unsupportedTiers": [
+        "flex",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:33:46.239Z"
+    }
+  }
+}

@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "entries": {
+    "opencode-go/deepseek-v4-flash": {
+      "provider": "opencode-go",
+      "id": "deepseek-v4-flash",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:33:59.925Z"
+    },
+    "opencode-go/deepseek-v4-pro": {
+      "provider": "opencode-go",
+      "id": "deepseek-v4-pro",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:34:16.581Z"
+    },
+    "opencode-go/glm-5": {
+      "provider": "opencode-go",
+      "id": "glm-5",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:34:42.070Z"
+    },
+    "opencode-go/glm-5.1": {
+      "provider": "opencode-go",
+      "id": "glm-5.1",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:34:49.871Z"
+    },
+    "opencode-go/kimi-k2.5": {
+      "provider": "opencode-go",
+      "id": "kimi-k2.5",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:34:56.622Z"
+    },
+    "opencode-go/kimi-k2.6": {
+      "provider": "opencode-go",
+      "id": "kimi-k2.6",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:35:03.167Z"
+    },
+    "opencode-go/mimo-v2.5": {
+      "provider": "opencode-go",
+      "id": "mimo-v2.5",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:35:22.752Z"
+    },
+    "opencode-go/mimo-v2.5-pro": {
+      "provider": "opencode-go",
+      "id": "mimo-v2.5-pro",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:35:33.744Z"
+    },
+    "opencode-go/minimax-m2.5": {
+      "provider": "opencode-go",
+      "id": "minimax-m2.5",
+      "api": "anthropic-messages",
+      "supported": false,
+      "tiers": [],
+      "unsupportedTiers": [
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:35:37.264Z"
+    },
+    "opencode-go/minimax-m2.7": {
+      "provider": "opencode-go",
+      "id": "minimax-m2.7",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:35:54.569Z"
+    },
+    "opencode-go/qwen3.5-plus": {
+      "provider": "opencode-go",
+      "id": "qwen3.5-plus",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:36:22.342Z"
+    },
+    "opencode-go/qwen3.6-plus": {
+      "provider": "opencode-go",
+      "id": "qwen3.6-plus",
+      "api": "openai-completions",
+      "supported": true,
+      "tiers": [
+        "priority",
+        "flex",
+        "default",
+        "auto",
+        "scale"
+      ],
+      "source": "probe",
+      "updatedAt": "2026-05-19T14:36:34.176Z"
+    }
+  }
+}
