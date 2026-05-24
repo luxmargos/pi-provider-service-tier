@@ -12,18 +12,18 @@
     "fast"
   ],
   "files": [
-    "index.ts",
+    "src/index.ts",
     "README.md"
   ],
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./src/index.ts"
     ]
   },
   "scripts": {
     "check": "npm run typecheck && npm test && npm run pack:dry-run",
     "pack:dry-run": "npm pack --dry-run",
-    "test": "node --test --experimental-strip-types index.test.ts",
+    "test": "node --test --experimental-strip-types src/index.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
