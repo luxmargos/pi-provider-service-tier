@@ -1,109 +1,165 @@
 # pi-provider-service-tier
 
-Local Pi extension for provider/model-scoped `service_tier` management.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
+[![Node.js >= 22](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org/)
+[![Pi extension](https://img.shields.io/badge/Pi-extension-purple.svg)](https://github.com/luxmargos/pi-provider-service-tier)
 
-This extension modifies outgoing provider request payloads with a top-level `service_tier` only when:
+A Pi extension that lets you choose an API `service_tier` per provider/model.
+
+Use it when you want to turn on faster or paid priority tiers for one model without changing your prompts, tools, selected model, or the rest of your Pi setup.
+
+## What it does
+
+- Adds a top-level `service_tier` field to outgoing provider request payloads.
+- Scopes settings to the current `provider/model` pair.
+- Supports project-local settings and user-global defaults.
+- Provides simple `/fast-*` commands for `service_tier: "priority"`.
+- Keeps a support map so unsupported provider/model pairs are not modified.
+- Detects unsupported tier errors and updates the support map.
+
+The extension only injects `service_tier` when all of these are true:
 
 1. the current `provider/model` pair is active in the effective config,
 2. a service tier is configured for that pair, and
-3. the persistent support map says that tier is supported for that pair.
+3. the support map says that tier is supported for that pair.
 
-It does not change the selected provider, model, thinking level, prompts, or tools.
+> [!NOTE]
+> This extension injects the provider payload field `service_tier`. For Pi's built-in OpenAI providers, Pi also has an internal `serviceTier` stream option used for cost accounting. This extension is intentionally broader and payload-hook based, so it does not adjust Pi's internal cost multiplier.
 
-> Note: this extension injects the request payload field `service_tier`. For Pi's built-in OpenAI providers, Pi also has an internal `serviceTier` stream option used for cost accounting. This extension is intentionally broader and payload-hook based, so it does not adjust Pi's internal cost multiplier.
+## Prerequisites
 
-## Local usage
+- Pi installed and available as `pi`.
+- Node.js `>=22`.
+- `git`, if installing directly from GitHub.
+- A provider/model that supports `service_tier` if you want injection to happen.
 
-### Temporary local test
+## Quick start
 
-From this repository, load the extension only for the current Pi run:
+### Option A: install from GitHub
 
-```bash
-pi -e ./packages/pi-provider-service-tier
-```
-
-Or with explicit provider/model:
-
-```bash
-pi -e ./packages/pi-provider-service-tier --provider openai --model gpt-5.5
-```
-
-### Local project installation
-
-Install the local package for this project so it loads whenever Pi is started from the repository:
+Install globally for your Pi user settings:
 
 ```bash
-pi install -l ./packages/pi-provider-service-tier
+pi install https://github.com/luxmargos/pi-provider-service-tier.git
 ```
 
-The `-l` flag writes the package entry to this repository's `.pi/settings.json` instead of the user-global `~/.pi/agent/settings.json`.
+Or install only for the current project:
 
-After installing, restart Pi or run:
+```bash
+pi install -l https://github.com/luxmargos/pi-provider-service-tier.git
+```
+
+Restart Pi, or run this inside Pi:
 
 ```text
 /reload
 ```
 
-Verify the package is installed:
+Then select a provider/model and enable priority mode:
+
+```text
+/fast-project on
+```
+
+Check the current project setting:
+
+```text
+/fast-project status
+```
+
+### Option B: clone locally
+
+```bash
+git clone https://github.com/luxmargos/pi-provider-service-tier.git
+cd pi-provider-service-tier
+npm install
+```
+
+Load it temporarily for one Pi run:
+
+```bash
+pi -e .
+```
+
+Or install the local checkout for the current project:
+
+```bash
+pi install -l .
+```
+
+Restart Pi or run `/reload`, then enable a tier:
+
+```text
+/service-tier-project priority
+```
+
+### Verify or remove
+
+List installed Pi packages:
 
 ```bash
 pi list
 ```
 
-Remove the project-local install:
+Remove the user-global GitHub install:
 
 ```bash
-pi remove -l ./packages/pi-provider-service-tier
+pi remove https://github.com/luxmargos/pi-provider-service-tier.git
 ```
 
-Do not use `-e ./packages/pi-provider-service-tier` at the same time as the installed project-local package, or Pi may load duplicate commands with numeric suffixes.
+Remove the project-local GitHub install:
 
-## Commands
-
-### Fast wrappers
-
-```text
-/fast-project
-/fast-project on
-/fast-project off
-/fast-project status
-
-/fast-user
-/fast-user on
-/fast-user off
-/fast-user status
+```bash
+pi remove -l https://github.com/luxmargos/pi-provider-service-tier.git
 ```
 
-Fast mode is a wrapper for enabling `service_tier: "priority"` for the current provider/model pair.
+Remove the project-local local checkout install:
 
-- `/fast-project` writes project config.
-- `/fast-user` writes user-global config.
+```bash
+pi remove -l .
+```
 
-### Explicit service tier
+> [!TIP]
+> Do not load the same checkout with `pi -e .` while it is also installed with `pi install -l .`. Pi may load duplicate commands with numeric suffixes.
+
+## Common usage
+
+### Fast mode
+
+Fast mode is a convenience wrapper for enabling `service_tier: "priority"` for the current provider/model.
+
+| Command | Scope | Description |
+| --- | --- | --- |
+| `/fast-project` | Current project | Toggle priority tier for the current provider/model. |
+| `/fast-project on` | Current project | Enable priority tier. |
+| `/fast-project off` | Current project | Disable this extension for the current provider/model in this project. |
+| `/fast-project status` | Current project | Show the current project setting. |
+| `/fast-user` | User-global | Toggle priority tier for the current provider/model. |
+| `/fast-user on` | User-global | Enable priority tier as a user default. |
+| `/fast-user off` | User-global | Disable the user-global setting for the current provider/model. |
+| `/fast-user status` | User-global | Show the current user-global setting. |
+
+### Explicit service tiers
+
+Use these commands when you want a tier other than `priority`.
+
+| Command | Scope | Arguments |
+| --- | --- | --- |
+| `/service-tier-project <tier>` | Current project | `priority`, `flex`, `default`, `auto`, `scale`, `off`, `status` |
+| `/service-tier-user <tier>` | User-global | `priority`, `flex`, `default`, `auto`, `scale`, `off`, `status` |
+
+Examples:
 
 ```text
-/service-tier-project priority
 /service-tier-project flex
-/service-tier-project default
-/service-tier-project auto
-/service-tier-project scale
 /service-tier-project off
-/service-tier-project status
-
 /service-tier-user priority
-/service-tier-user flex
-/service-tier-user default
-/service-tier-user auto
-/service-tier-user scale
-/service-tier-user off
 /service-tier-user status
 ```
 
-By default, commands apply only to the current provider/model pair.
+Commands apply only to the current provider/model pair. Argument completions are available; type a command plus a space, then press Tab.
 
-Argument completions are available for the service-tier, fast-mode, and debug commands. For example, type `/service-tier-project ` and press Tab to choose `priority`, `flex`, `default`, `auto`, `scale`, `off`, or `status`.
-
-### Build support map
+### Build or refresh the support map
 
 ```text
 /service-tier-build-map
@@ -111,11 +167,14 @@ Argument completions are available for the service-tier, fast-mode, and debug co
 ```
 
 - `/service-tier-build-map` updates the support map for the current provider/model.
-- `/service-tier-build-map-all` updates the support map for all `ctx.modelRegistry.getAvailable()` models.
+- `/service-tier-build-map-all` updates the support map for all models returned by Pi's model registry.
 
-With aggressive probing off, map building uses bundled presets. With aggressive probing on, the extension sends low-token probe requests for each tier and model. Aggressive probing can cost money and trigger rate limits.
+With aggressive probing off, map building uses bundled presets. With aggressive probing on, the extension sends low-token probe requests for each tier and model.
 
-### Debug notifications
+> [!WARNING]
+> Aggressive probing can cost money and trigger provider rate limits. It is off by default.
+
+### Debug injection decisions
 
 ```text
 /service-tier-debug on
@@ -125,9 +184,9 @@ With aggressive probing off, map building uses bundled presets. With aggressive 
 
 Debug mode is session-local. When enabled, the extension notifies whether each provider request was injected with `service_tier` or skipped.
 
-## Config files
+## Configuration files
 
-This package uses `pi-provider-service-tier` for package and config-file identity. If you previously used the old local package name, move or copy any existing `pi-service-tier*.json` files to the filenames below.
+This package uses `pi-provider-service-tier` for package and config-file identity.
 
 Project config:
 
@@ -146,6 +205,14 @@ Global support map:
 ```text
 ~/.pi/agent/extensions/pi-provider-service-tier-map.json
 ```
+
+Project and user configs are merged:
+
+- user config provides defaults,
+- project config overrides fields for the same provider/model key,
+- provider/model entries that exist only in user config still apply in projects unless overridden.
+
+If you previously used an older local package name, move or copy any existing `pi-service-tier*.json` files to the filenames above.
 
 ## Config schema
 
@@ -167,12 +234,6 @@ Example:
   }
 }
 ```
-
-Project and user configs are merged:
-
-- user config provides defaults,
-- project config overrides fields for the same provider/model key,
-- provider/model entries that exist only in user config still apply in projects unless overridden.
 
 `aggressiveProbe` defaults to `false`. Set it manually in either config file. Project config overrides user config for this field.
 
@@ -219,7 +280,8 @@ If a provider returns an error indicating `service_tier` is unsupported or inval
 ## Development
 
 ```bash
-cd packages/pi-provider-service-tier
+git clone https://github.com/luxmargos/pi-provider-service-tier.git
+cd pi-provider-service-tier
 npm install
 npm run check
 ```
@@ -227,5 +289,11 @@ npm run check
 Local smoke test:
 
 ```bash
-pi -e ./packages/pi-provider-service-tier --provider openai --model gpt-5.5
+pi -e . --provider openai --model gpt-5.5
 ```
+
+`npm run check` runs TypeScript type checking, Node tests, and `npm pack --dry-run` to verify the published package contents.
+
+## License
+
+MIT
