@@ -40,13 +40,13 @@ The extension only injects `service_tier` when all of these are true:
 Install globally for your Pi user settings:
 
 ```bash
-pi install https://github.com/luxmargos/pi-provider-service-tier.git
+pi install git:github.com/luxmargos/pi-provider-service-tier
 ```
 
 Or install only for the current project:
 
 ```bash
-pi install -l https://github.com/luxmargos/pi-provider-service-tier.git
+pi install -l git:github.com/luxmargos/pi-provider-service-tier
 ```
 
 Restart Pi, or run this inside Pi:
@@ -104,13 +104,13 @@ pi list
 Remove the user-global GitHub install:
 
 ```bash
-pi remove https://github.com/luxmargos/pi-provider-service-tier.git
+pi remove git:github.com/luxmargos/pi-provider-service-tier
 ```
 
 Remove the project-local GitHub install:
 
 ```bash
-pi remove -l https://github.com/luxmargos/pi-provider-service-tier.git
+pi remove -l git:github.com/luxmargos/pi-provider-service-tier
 ```
 
 Remove the project-local local checkout install:
