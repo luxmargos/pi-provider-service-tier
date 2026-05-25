@@ -1,5 +1,6 @@
 # pi-provider-service-tier
 
+[![npm version](https://img.shields.io/npm/v/pi-provider-service-tier.svg)](https://www.npmjs.com/package/pi-provider-service-tier)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 [![Node.js >= 22](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org/)
 [![Pi extension](https://img.shields.io/badge/Pi-extension-purple.svg)](https://github.com/luxmargos/pi-provider-service-tier)
@@ -35,18 +36,18 @@ The extension only injects `service_tier` when all of these are true:
 
 ## Quick start
 
-### Option A: install from GitHub
+### Option A: install from npm
 
 Install globally for your Pi user settings:
 
 ```bash
-pi install git:github.com/luxmargos/pi-provider-service-tier
+pi install npm:pi-provider-service-tier
 ```
 
 Or install only for the current project:
 
 ```bash
-pi install -l git:github.com/luxmargos/pi-provider-service-tier
+pi install -l npm:pi-provider-service-tier
 ```
 
 Restart Pi, or run this inside Pi:
@@ -67,7 +68,21 @@ Check the current project setting:
 /fast-project status
 ```
 
-### Option B: clone locally
+### Option B: install from GitHub
+
+Install globally for your Pi user settings:
+
+```bash
+pi install git:github.com/luxmargos/pi-provider-service-tier
+```
+
+Or install only for the current project:
+
+```bash
+pi install -l git:github.com/luxmargos/pi-provider-service-tier
+```
+
+### Option C: clone locally
 
 ```bash
 git clone https://github.com/luxmargos/pi-provider-service-tier.git
@@ -99,6 +114,18 @@ List installed Pi packages:
 
 ```bash
 pi list
+```
+
+Remove the user-global npm install:
+
+```bash
+pi remove npm:pi-provider-service-tier
+```
+
+Remove the project-local npm install:
+
+```bash
+pi remove -l npm:pi-provider-service-tier
 ```
 
 Remove the user-global GitHub install:
