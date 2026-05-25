@@ -13,6 +13,7 @@
   ],
   "files": [
     "src/index.ts",
+    "presets/*.json",
     "README.md"
   ],
   "pi": {

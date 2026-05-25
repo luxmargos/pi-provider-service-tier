@@ -50,6 +50,24 @@ const codexModel = {
   thinkingLevelMap: { high: "high" },
 } as never;
 
+const opencodeQwenModel = {
+  provider: "opencode-go",
+  id: "qwen3.5-plus",
+  api: "openai-completions",
+  maxTokens: 128000,
+  reasoning: true,
+  thinkingLevelMap: { high: "high" },
+} as never;
+
+const opencodeMinimaxModel = {
+  provider: "opencode-go",
+  id: "minimax-m2.5",
+  api: "anthropic-messages",
+  maxTokens: 128000,
+  reasoning: true,
+  thinkingLevelMap: { high: "high" },
+} as never;
+
 test("recognizes known service tiers", () => {
   for (const tier of SERVICE_TIERS) assert.equal(isServiceTier(tier), true);
   assert.equal(isServiceTier("turbo"), false);
@@ -156,13 +174,22 @@ test("resolves effective config from files", () => {
   }
 });
 
-test("uses preset map support for known OpenAI APIs", () => {
+test("uses preset map support for known OpenAI APIs and bundled probe presets", () => {
   assert.deepEqual(presetTiersForModel(openAIModel), ["priority", "flex", "default", "auto", "scale"]);
-  assert.deepEqual(presetTiersForModel(codexModel), ["priority"]);
+  assert.deepEqual(presetTiersForModel(codexModel), ["priority", "default"]);
+  assert.deepEqual(presetTiersForModel(opencodeQwenModel), ["priority", "flex", "default", "auto"]);
+  assert.deepEqual(presetTiersForModel(opencodeMinimaxModel), []);
   assert.deepEqual(presetTiersForModel({ provider: "anthropic", api: "anthropic-messages" } as never), []);
+
   const entry = buildPresetMapEntry(codexModel);
   assert.equal(entry.supported, true);
-  assert.deepEqual(entry.tiers, ["priority"]);
+  assert.equal(entry.source, "preset");
+  assert.deepEqual(entry.tiers, ["priority", "default"]);
+  assert.deepEqual(entry.unsupportedTiers, ["flex", "auto", "scale"]);
+
+  const minimaxEntry = buildPresetMapEntry(opencodeMinimaxModel);
+  assert.equal(minimaxEntry.supported, false);
+  assert.deepEqual(minimaxEntry.tiers, []);
 });
 
 test("injects only when active and map-supported", () => {
@@ -227,7 +254,7 @@ test("auto-seeds missing current-model map entry from presets", () => {
   try {
     const paths = configPaths(cwd, home);
     const seeded = _test.seedPresetMapEntryIfMissing(paths.map, { entries: {} }, codexModel);
-    assert.deepEqual(seeded.entries?.["openai-codex/gpt-5.5"].tiers, ["priority"]);
+    assert.deepEqual(seeded.entries?.["openai-codex/gpt-5.5"].tiers, ["priority", "default"]);
     assert.equal(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"].supported, true);
   } finally {
     rmSync(cwd, { recursive: true, force: true });

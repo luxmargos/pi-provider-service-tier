@@ -260,13 +260,15 @@ Example:
 
 Preset support currently includes:
 
-| Provider/API | Tiers |
-| --- | --- |
-| `openai` + `openai-responses` | `priority`, `flex`, `default`, `auto`, `scale` |
-| `openai` + `openai-completions` | `priority`, `flex`, `default`, `auto`, `scale` |
-| `openai-codex` + `openai-codex-responses` | `priority` |
+| Provider/API | Models | Tiers |
+| --- | --- | --- |
+| `openai` + `openai-responses` | all | `priority`, `flex`, `default`, `auto`, `scale` |
+| `openai` + `openai-completions` | all | `priority`, `flex`, `default`, `auto`, `scale` |
+| `openai-codex` + `openai-codex-responses` | probed models in `presets/openai-codex.json` | `priority`, `default` |
+| `openai-codex` + `openai-codex-responses` | fallback for other models | `priority` |
+| `opencode-go` + `openai-completions` | probed models in `presets/opencode-go.json` | model-specific; usually `priority`, `flex`, `default`, `auto`, `scale` |
 
-Other providers are marked unsupported by presets until aggressive probing or future presets add support.
+Other providers/models are marked unsupported by presets until aggressive probing or future presets add support.
 
 ## Unsupported tier errors
 

@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   getApiProvider,
   type Api,
@@ -162,6 +163,46 @@ function normalizeMapEntries(value: unknown): Record<string, ServiceTierMapEntry
   return entries;
 }
 
+function loadBundledPresetEntries(): Record<string, ServiceTierMapEntry> {
+  const presetDir = join(dirname(fileURLToPath(import.meta.url)), "..", "presets");
+  if (!existsSync(presetDir)) return {};
+  const entries: Record<string, ServiceTierMapEntry> = {};
+  for (const file of readdirSync(presetDir).filter((name) => name.endsWith(".json")).sort()) {
+    try {
+      const parsed = JSON.parse(readFileSync(join(presetDir, file), "utf8")) as unknown;
+      if (!isRecord(parsed)) continue;
+      const normalized = normalizeMapEntries(parsed.entries);
+      if (!normalized) continue;
+      for (const [key, entry] of Object.entries(normalized)) {
+        entries[key] = { ...entry, tiers: [...entry.tiers], source: "preset" };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[${PACKAGE_NAME}] Failed to read bundled preset ${file}: ${message}`);
+    }
+  }
+  return entries;
+}
+
+const BUNDLED_PRESET_ENTRIES = loadBundledPresetEntries();
+
+type PresetLookupModel = Pick<Model<Api>, "provider" | "api"> & Partial<Pick<Model<Api>, "id">>;
+
+function bundledPresetEntryForModel(model: PresetLookupModel): ServiceTierMapEntry | undefined {
+  if (!model.id) return undefined;
+  const entry = BUNDLED_PRESET_ENTRIES[`${model.provider}/${model.id}`];
+  if (!entry) return undefined;
+  if (entry.api && entry.api !== model.api) return undefined;
+  return {
+    ...entry,
+    provider: model.provider,
+    id: model.id,
+    api: model.api,
+    tiers: [...entry.tiers],
+    ...(entry.unsupportedTiers ? { unsupportedTiers: [...entry.unsupportedTiers] } : {}),
+  };
+}
+
 export function parseModelKey(value: string): { provider: string; id: string } | undefined {
   const trimmed = value.trim();
   const slash = trimmed.indexOf("/");
@@ -304,7 +345,9 @@ export function setScopedEntry(paths: ConfigPaths, scope: ConfigScope, key: stri
   return next;
 }
 
-export function presetTiersForModel(model: Pick<Model<Api>, "provider" | "api">): ServiceTier[] {
+export function presetTiersForModel(model: PresetLookupModel): ServiceTier[] {
+  const bundled = bundledPresetEntryForModel(model);
+  if (bundled) return [...bundled.tiers];
   if (model.provider === "openai" && (model.api === "openai-responses" || model.api === "openai-completions")) {
     return [...SERVICE_TIERS];
   }
@@ -315,6 +358,8 @@ export function presetTiersForModel(model: Pick<Model<Api>, "provider" | "api">)
 }
 
 export function buildPresetMapEntry(model: Pick<Model<Api>, "provider" | "id" | "api">): ServiceTierMapEntry {
+  const bundled = bundledPresetEntryForModel(model);
+  if (bundled) return bundled;
   const tiers = presetTiersForModel(model);
   return {
     provider: model.provider,
