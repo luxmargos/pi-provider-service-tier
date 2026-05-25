@@ -198,6 +198,15 @@ Commands apply only to the current provider/model pair. Argument completions are
 
 With aggressive probing off, map building uses bundled presets. With aggressive probing on, the extension sends low-token probe requests for each tier and model.
 
+Toggle aggressive probing for the current project config:
+
+```text
+/service-tier-aggressive-probe
+/service-tier-aggressive-probe on
+/service-tier-aggressive-probe off
+/service-tier-aggressive-probe status
+```
+
 > [!WARNING]
 > Aggressive probing can cost money and trigger provider rate limits. It is off by default.
 
@@ -262,7 +271,7 @@ Example:
 }
 ```
 
-`aggressiveProbe` defaults to `false`. Set it manually in either config file. Project config overrides user config for this field.
+`aggressiveProbe` defaults to `false`. Use `/service-tier-aggressive-probe [on|off|status]` to manage the project config, or set it manually in either config file. Project config overrides user config for this field.
 
 ## Support map schema
 

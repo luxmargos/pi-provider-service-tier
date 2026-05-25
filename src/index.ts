@@ -28,6 +28,7 @@ const COMMAND_TIER_PROJECT = "service-tier-project";
 const COMMAND_TIER_USER = "service-tier-user";
 const COMMAND_BUILD_MAP = "service-tier-build-map";
 const COMMAND_BUILD_MAP_ALL = "service-tier-build-map-all";
+const COMMAND_AGGRESSIVE_PROBE = "service-tier-aggressive-probe";
 const COMMAND_DEBUG = "service-tier-debug";
 
 export const SERVICE_TIERS = ["priority", "flex", "default", "auto", "scale"] as const;
@@ -347,6 +348,13 @@ export function setScopedEntry(paths: ConfigPaths, scope: ConfigScope, key: stri
   return next;
 }
 
+export function setScopedAggressiveProbe(paths: ConfigPaths, scope: ConfigScope, aggressiveProbe: boolean): ConfigFile {
+  const config = readScopeConfig(paths, scope);
+  const next = { ...config, aggressiveProbe };
+  writeScopeConfig(paths, scope, next);
+  return next;
+}
+
 export function presetTiersForModel(model: PresetLookupModel): ServiceTier[] {
   const bundled = bundledPresetEntryForModel(model);
   if (bundled) return [...bundled.tiers];
@@ -511,6 +519,10 @@ function fastCompletions(prefix: string) {
   return valueCompletions(TOGGLE_COMMAND_ARGS, prefix);
 }
 
+function aggressiveProbeCompletions(prefix: string) {
+  return valueCompletions(TOGGLE_COMMAND_ARGS, prefix);
+}
+
 function debugCompletions(prefix: string) {
   return valueCompletions(TOGGLE_COMMAND_ARGS, prefix);
 }
@@ -524,6 +536,7 @@ function installCommandArgumentAutocomplete(ctx: ExtensionContext): void {
         [COMMAND_TIER_USER]: tierCompletions,
         [COMMAND_FAST_PROJECT]: fastCompletions,
         [COMMAND_FAST_USER]: fastCompletions,
+        [COMMAND_AGGRESSIVE_PROBE]: aggressiveProbeCompletions,
         [COMMAND_DEBUG]: debugCompletions,
       };
 
@@ -588,6 +601,41 @@ async function handleFastCommand(scope: ConfigScope, args: string, ctx: Extensio
   setScopedEntry(paths, scope, key, turnOn ? { active: true, serviceTier: "priority" } : { active: false });
   updateStatus(ctx);
   ctx.ui.notify(`${scope} fast mode ${turnOn ? "enabled" : "disabled"} for ${key}.`, "info");
+}
+
+function aggressiveProbeScopeValue(config: ConfigFile | undefined): "on" | "off" | "unset" {
+  return config?.aggressiveProbe === undefined ? "unset" : config.aggressiveProbe ? "on" : "off";
+}
+
+function notifyAggressiveProbeStatus(ctx: ExtensionCommandContext): void {
+  const paths = getPaths(ctx);
+  const userConfig = readConfig(paths.user);
+  const projectConfig = readConfig(paths.project);
+  const effective = mergeConfigs(userConfig, projectConfig, paths);
+  ctx.ui.notify(
+    `aggressiveProbe is ${effective.aggressiveProbe ? "on" : "off"} (project: ${aggressiveProbeScopeValue(projectConfig)}; user: ${aggressiveProbeScopeValue(userConfig)}).`,
+    "info",
+  );
+}
+
+async function handleAggressiveProbeCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
+  const arg = args.trim().toLowerCase();
+  if (arg === "status") return notifyAggressiveProbeStatus(ctx);
+  if (arg && arg !== "on" && arg !== "off") {
+    ctx.ui.notify("Usage: /service-tier-aggressive-probe [on|off|status]", "error");
+    return;
+  }
+  const paths = getPaths(ctx);
+  const effective = mergeConfigs(readConfig(paths.user), readConfig(paths.project), paths);
+  const turnOn = arg === "on" ? true : arg === "off" ? false : !effective.aggressiveProbe;
+  setScopedAggressiveProbe(paths, "project", turnOn);
+  updateStatus(ctx);
+  ctx.ui.notify(
+    `project aggressiveProbe ${turnOn ? "enabled" : "disabled"}. ${
+      turnOn ? "Build-map commands will send low-token provider probes." : "Build-map commands will use bundled presets."
+    }`,
+    turnOn ? "warning" : "info",
+  );
 }
 
 function upsertMapEntry(path: string, entry: ServiceTierMapEntry): ServiceTierMapFile {
@@ -755,6 +803,12 @@ export default function piServiceTier(pi: ExtensionAPI): void {
     handler: commandHandler(async (_args, ctx) => handleBuildMapAll(ctx)),
   });
 
+  pi.registerCommand(COMMAND_AGGRESSIVE_PROBE, {
+    description: "Toggle project-level aggressive probing for service_tier support-map builds",
+    getArgumentCompletions: aggressiveProbeCompletions,
+    handler: commandHandler((args, ctx) => handleAggressiveProbeCommand(args, ctx)),
+  });
+
   pi.registerCommand(COMMAND_DEBUG, {
     description: "Toggle service_tier injection debug notifications for this Pi session",
     getArgumentCompletions: debugCompletions,
@@ -854,10 +908,13 @@ export const _test = {
   COMMAND_TIER_USER,
   COMMAND_BUILD_MAP,
   COMMAND_BUILD_MAP_ALL,
+  COMMAND_AGGRESSIVE_PROBE,
   COMMAND_DEBUG,
   TIER_COMMAND_ARGS,
   TOGGLE_COMMAND_ARGS,
   valueCompletions,
+  aggressiveProbeCompletions,
+  aggressiveProbeScopeValue,
   payloadWithServiceTier,
   statusText,
   colorStatus,

@@ -22,6 +22,7 @@ import {
   readMap,
   resolveEffectiveConfig,
   resolveTierForModel,
+  setScopedAggressiveProbe,
   setScopedEntry,
   writeConfig,
   writeMap,
@@ -159,6 +160,22 @@ test("setScopedEntry writes provider/model entries", () => {
   }
 });
 
+test("setScopedAggressiveProbe writes scoped flag without dropping entries", () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  try {
+    const paths = configPaths(cwd, home);
+    setScopedEntry(paths, "project", "openai/gpt-5.5", { active: true, serviceTier: "priority" });
+    setScopedAggressiveProbe(paths, "project", true);
+    const config = readConfig(paths.project);
+    assert.equal(config?.aggressiveProbe, true);
+    assert.deepEqual(config?.entries?.["openai/gpt-5.5"], { active: true, serviceTier: "priority" });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("resolves effective config from files", () => {
   const cwd = tempDir();
   const home = tempDir();
@@ -233,6 +250,14 @@ test("detects unsupported service_tier errors and updates map without retry stat
 test("aggressive mode is off by default", () => {
   const effective = mergeConfigs(undefined, undefined, configPaths("/repo", "/home/user"));
   assert.equal(effective.aggressiveProbe, false);
+});
+
+test("aggressive probe command exports toggle completions", () => {
+  assert.equal(_test.COMMAND_AGGRESSIVE_PROBE, "service-tier-aggressive-probe");
+  assert.deepEqual(_test.aggressiveProbeCompletions("o"), [
+    { value: "on", label: "on" },
+    { value: "off", label: "off" },
+  ]);
 });
 
 test("can persist map entries", () => {
