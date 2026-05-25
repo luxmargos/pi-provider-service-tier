@@ -16,6 +16,8 @@ const CONFIG_BASENAME = "pi-provider-service-tier.json";
 const MAP_BASENAME = "pi-provider-service-tier-map.json";
 const STATUS_KEY = "pi-provider-service-tier";
 const STATUS_ICON = "⚡";
+const PROBE_TIMEOUT_MS = 30_000;
+const PROBE_TIMEOUT = Symbol("probe-timeout");
 const ANSI_RESET = "\u001b[0m";
 const ANSI_GREEN = "\u001b[32m";
 const ANSI_YELLOW = "\u001b[33m";
@@ -602,7 +604,7 @@ async function probeTier(model: Model<Api>, tier: ServiceTier, ctx: ExtensionCom
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok) return "unknown";
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const context: ProviderContext = {
       messages: [{ role: "user", content: "Reply OK.", timestamp: Date.now() }],
@@ -614,19 +616,32 @@ async function probeTier(model: Model<Api>, tier: ServiceTier, ctx: ExtensionCom
       signal: controller.signal,
       onPayload: (payload) => payloadWithServiceTier(payload, tier) ?? payload,
     };
-    const stream = provider.streamSimple(model, context, options);
-    for await (const event of stream) {
+    const iterator = provider.streamSimple(model, context, options)[Symbol.asyncIterator]();
+    const timeoutPromise = new Promise<typeof PROBE_TIMEOUT>((resolve) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        resolve(PROBE_TIMEOUT);
+      }, PROBE_TIMEOUT_MS);
+    });
+
+    while (true) {
+      const next = await Promise.race([iterator.next(), timeoutPromise]);
+      if (next === PROBE_TIMEOUT) {
+        void iterator.return?.();
+        return "unknown";
+      }
+      if (next.done) return "supported";
+      const event = next.value;
       if (event.type === "done") return "supported";
       if (event.type === "error") {
         return isUnsupportedServiceTierError(event.error.errorMessage) ? "unsupported" : "unknown";
       }
     }
-    return "supported";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return isUnsupportedServiceTierError(message) ? "unsupported" : "unknown";
   } finally {
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -684,39 +699,60 @@ async function handleBuildMapAll(ctx: ExtensionCommandContext): Promise<void> {
 export default function piServiceTier(pi: ExtensionAPI): void {
   let lastApplied: LastAppliedTier | undefined;
   let debugEnabled = false;
+  let stateCache: { config: EffectiveConfig; map: ServiceTierMapFile } | undefined;
+
+  const invalidateStateCache = () => {
+    stateCache = undefined;
+  };
+  const getCachedState = (ctx: ExtensionContext) => {
+    stateCache ??= loadState(ctx);
+    return stateCache;
+  };
+  const refreshStatus = (ctx: ExtensionContext) => {
+    stateCache = loadState(ctx);
+    ctx.ui.setStatus(STATUS_KEY, statusText(stateCache.config, stateCache.map, ctx.model) ?? undefined);
+  };
+  const commandHandler = (handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>) => async (args: string, ctx: ExtensionCommandContext) => {
+    invalidateStateCache();
+    try {
+      await handler(args, ctx);
+    } finally {
+      invalidateStateCache();
+    }
+  };
 
   pi.registerCommand(COMMAND_FAST_PROJECT, {
     description: "Toggle project-level priority service_tier for the current provider/model",
     getArgumentCompletions: fastCompletions,
-    handler: (args, ctx) => handleFastCommand("project", args, ctx),
+    handler: commandHandler((args, ctx) => handleFastCommand("project", args, ctx)),
   });
 
   pi.registerCommand(COMMAND_FAST_USER, {
     description: "Toggle user-global priority service_tier for the current provider/model",
     getArgumentCompletions: fastCompletions,
-    handler: (args, ctx) => handleFastCommand("user", args, ctx),
+    handler: commandHandler((args, ctx) => handleFastCommand("user", args, ctx)),
   });
 
   pi.registerCommand(COMMAND_TIER_PROJECT, {
     description: "Manage project-level service_tier for the current provider/model",
     getArgumentCompletions: tierCompletions,
-    handler: (args, ctx) => handleTierCommand("project", args, ctx),
+    handler: commandHandler((args, ctx) => handleTierCommand("project", args, ctx)),
   });
 
   pi.registerCommand(COMMAND_TIER_USER, {
     description: "Manage user-global service_tier for the current provider/model",
     getArgumentCompletions: tierCompletions,
-    handler: (args, ctx) => handleTierCommand("user", args, ctx),
+    handler: commandHandler((args, ctx) => handleTierCommand("user", args, ctx)),
   });
 
   pi.registerCommand(COMMAND_BUILD_MAP, {
     description: "Build/update service_tier support map for the current provider/model",
-    handler: async (_args, ctx) => handleBuildMap(ctx),
+    handler: commandHandler(async (_args, ctx) => handleBuildMap(ctx)),
   });
 
   pi.registerCommand(COMMAND_BUILD_MAP_ALL, {
     description: "Build/update service_tier support map for all available models",
-    handler: async (_args, ctx) => handleBuildMapAll(ctx),
+    handler: commandHandler(async (_args, ctx) => handleBuildMapAll(ctx)),
   });
 
   pi.registerCommand(COMMAND_DEBUG, {
@@ -746,19 +782,21 @@ export default function piServiceTier(pi: ExtensionAPI): void {
     installCommandArgumentAutocomplete(ctx);
     const paths = getPaths(ctx);
     ensureMap(paths.map);
-    updateStatus(ctx);
+    refreshStatus(ctx);
   });
 
   pi.on("model_select", async (_event, ctx) => {
-    updateStatus(ctx);
+    invalidateStateCache();
+    refreshStatus(ctx);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    invalidateStateCache();
     ctx.ui.setStatus(STATUS_KEY, undefined);
   });
 
   pi.on("before_provider_request", async (event, ctx) => {
-    const { config, map } = loadState(ctx);
+    const { config, map } = getCachedState(ctx);
     const key = modelKey(ctx.model);
     const tier = resolveTierForModel(config, map, ctx.model);
     const nextPayload = tier ? payloadWithServiceTier(event.payload, tier) : undefined;
@@ -773,7 +811,6 @@ export default function piServiceTier(pi: ExtensionAPI): void {
       return undefined;
     }
     lastApplied = { key, tier, at: Date.now() };
-    updateStatus(ctx);
     if (debugEnabled) {
       ctx.ui.notify(`service_tier debug: injected service_tier=${tier} into ${key} request.`, "info");
     }
@@ -790,7 +827,8 @@ export default function piServiceTier(pi: ExtensionAPI): void {
     const map = ensureMap(paths.map);
     const next = markTierUnsupported(map, lastApplied.key, lastApplied.tier, errorMessage);
     writeMap(paths.map, next);
-    updateStatus(ctx);
+    invalidateStateCache();
+    refreshStatus(ctx);
     ctx.ui.notify(
       `service_tier=${lastApplied.tier} is unsupported for ${lastApplied.key}; updated ${MAP_BASENAME}. The failed request was not retried.`,
       "warning",
