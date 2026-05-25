@@ -47,5 +47,8 @@
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"
   },
-  "author": "luxmargos"
+  "author": {
+    "name": "luxmargos",
+    "email": "owlflyx12@gmail.com"
+  }
 }
