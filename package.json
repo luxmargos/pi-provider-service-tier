@@ -1,10 +1,9 @@
 {
   "name": "pi-provider-service-tier",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Provider/model-scoped service_tier management extension for Pi",
   "type": "module",
   "license": "MIT",
-  "private": true,
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -39,5 +38,13 @@
   },
   "engines": {
     "node": ">=22.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luxmargos/pi-provider-service-tier.git"
+  },
+  "bugs": {
+    "url": "https://github.com/luxmargos/pi-provider-service-tier/issues"
+  },
+  "homepage": "https://github.com/luxmargos/pi-provider-service-tier#readme"
 }
