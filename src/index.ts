@@ -8,8 +8,8 @@ import {
   type Context as ProviderContext,
   type Model,
   type SimpleStreamOptions,
-} from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const PACKAGE_NAME = "pi-provider-service-tier";
 const CONFIG_BASENAME = "pi-provider-service-tier.json";
