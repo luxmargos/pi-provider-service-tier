@@ -1,6 +1,6 @@
-# @luxmargos/pi-provider-service-tier
+# pi-provider-service-tier
 
-[![npm version](https://img.shields.io/npm/v/@luxmargos%2Fpi-provider-service-tier.svg)](https://www.npmjs.com/package/@luxmargos/pi-provider-service-tier)
+[![npm version](https://img.shields.io/npm/v/pi-provider-service-tier.svg)](https://www.npmjs.com/package/pi-provider-service-tier)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 [![Node.js >= 22](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org/)
 [![Pi extension](https://img.shields.io/badge/Pi-extension-purple.svg)](https://github.com/luxmargos/pi-provider-service-tier)
@@ -39,7 +39,7 @@ The extension only injects `service_tier` when all of these are true:
 Install the package, reload Pi, then enable priority mode for the current provider/model.
 
 ```bash
-pi install npm:@luxmargos/pi-provider-service-tier
+pi install npm:pi-provider-service-tier
 ```
 
 Inside Pi:
@@ -50,7 +50,7 @@ Inside Pi:
 /fast-project status
 ```
 
-Use `pi install -l npm:@luxmargos/pi-provider-service-tier` instead if you want a project-local install rather than a user-global install.
+Use `pi install -l npm:pi-provider-service-tier` instead if you want a project-local install rather than a user-global install.
 
 ## Installation details
 
@@ -59,13 +59,13 @@ Use `pi install -l npm:@luxmargos/pi-provider-service-tier` instead if you want 
 Install globally for your Pi user settings:
 
 ```bash
-pi install npm:@luxmargos/pi-provider-service-tier
+pi install npm:pi-provider-service-tier
 ```
 
 Or install only for the current project:
 
 ```bash
-pi install -l npm:@luxmargos/pi-provider-service-tier
+pi install -l npm:pi-provider-service-tier
 ```
 
 Restart Pi, or run `/reload` inside Pi after installing.
@@ -121,13 +121,13 @@ pi list
 Remove the user-global npm install:
 
 ```bash
-pi remove npm:@luxmargos/pi-provider-service-tier
+pi remove npm:pi-provider-service-tier
 ```
 
 Remove the project-local npm install:
 
 ```bash
-pi remove -l npm:@luxmargos/pi-provider-service-tier
+pi remove -l npm:pi-provider-service-tier
 ```
 
 Remove the user-global GitHub install:
@@ -224,7 +224,7 @@ Debug mode is session-local. When enabled, the extension notifies whether each p
 
 ## Configuration files
 
-The npm package is scoped as `@luxmargos/pi-provider-service-tier`. Runtime config files continue to use `pi-provider-service-tier` as their stable config-file identity.
+This package uses `pi-provider-service-tier` for package and config-file identity.
 
 Project config:
 
