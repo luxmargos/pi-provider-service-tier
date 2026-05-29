@@ -13,6 +13,7 @@
   "files": [
     "src/index.ts",
     "presets/*.json",
+    "scripts/*.mjs",
     "README.md"
   ],
   "pi": {
@@ -21,6 +22,8 @@
     ]
   },
   "scripts": {
+    "bench:service-tier": "node scripts/benchmark-service-tier.mjs",
+    "bench:service-tier:swap": "PST_BENCH_START_WITH=tier node scripts/benchmark-service-tier.mjs",
     "check": "npm run typecheck && npm test && npm run pack:dry-run",
     "pack:dry-run": "npm pack --dry-run",
     "test": "node --test --experimental-strip-types src/index.test.ts",
