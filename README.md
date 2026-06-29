@@ -206,7 +206,9 @@ Commands apply only to the current provider/model pair. Argument completions are
 
 Refresh commands are preset-only and do not call providers. Unset commands do not mark models unsupported.
 
-### Unsupported behavior
+Tier and fast commands preserve `source: "probe"` map entries when the requested tier is already recorded in `tiers` or `unsupportedTiers`. Use refresh commands when you intentionally want to replace support data from bundled presets.
+
+### Unknown behavior
 
 ```text
 /service-tier-unknown-behavior ask
@@ -223,6 +225,8 @@ Refresh commands are preset-only and do not call providers. Unset commands do no
 - `Leave unknown and do not ask again`
 
 `aggressive` injects the configured tier even when support is unknown. `unknown` leaves unknown tiers uninjected. The command writes user-global config.
+
+In `ask` mode, the prompt is shown only when the map entry has `"determined": false` and `source` is not `"user-mark"`.
 
 `Use aggressive mode once` and `Use aggressive mode and do not ask again` immediately run low-token current-model probes for every known service tier and show progress notifications while the extension waits for provider results. A completed probe cycle writes one `source: "probe"` map entry with complete `tiers` and `unsupportedTiers`. If any tier cannot be determined, the support map is not overwritten with partial probe results. Failed probes are not retried.
 
@@ -289,6 +293,8 @@ Example:
 
 `unknownModelBehavior` is optional and defaults to `ask`. Valid values are `ask`, `aggressive`, and `unknown`. Use `/service-tier-unknown-behavior [ask|aggressive|unknown|status]` to manage the user-global setting, or set it manually in either config file. Project config overrides user config for this field.
 
+On extension startup, existing config and support-map files are migrated one schema version at a time before the extension refreshes stored non-probe entries from bundled presets. Read paths tolerate older files, but the persisted migration rewrite happens during startup.
+
 ## Support map schema
 
 Example:
@@ -301,7 +307,7 @@ Example:
       "provider": "openai",
       "id": "gpt-5.5",
       "api": "openai-responses",
-      "supported": true,
+      "determined": true,
       "tiers": ["priority", "flex", "default", "auto", "scale"],
       "source": "preset",
       "updatedAt": "2026-05-19T00:00:00.000Z"
@@ -310,7 +316,7 @@ Example:
 }
 ```
 
-`source` is `preset` for bundled preset refreshes, `probe` for aggressive probe results, `error` for provider errors observed during normal requests, and `manual` for manual map edits.
+`determined` means the entry has a complete stored support decision from presets or a completed aggressive probe. `source` is `preset` for bundled preset refreshes, `probe` for aggressive probe results, `error` for provider errors observed during normal requests, `user-mark` for user choices to leave support unknown, and `manual` for manual map edits.
 
 Preset support currently includes:
 

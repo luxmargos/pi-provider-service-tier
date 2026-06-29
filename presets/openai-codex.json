@@ -1,11 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "entries": {
     "openai-codex/gpt-5.5": {
       "provider": "openai-codex",
       "id": "gpt-5.5",
       "api": "openai-codex-responses",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "default"
@@ -22,7 +22,7 @@
       "provider": "openai-codex",
       "id": "gpt-5.2",
       "api": "openai-codex-responses",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "default"
@@ -39,7 +39,7 @@
       "provider": "openai-codex",
       "id": "gpt-5.3-codex",
       "api": "openai-codex-responses",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "default"
@@ -56,7 +56,7 @@
       "provider": "openai-codex",
       "id": "gpt-5.3-codex-spark",
       "api": "openai-codex-responses",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "default"
@@ -73,7 +73,7 @@
       "provider": "openai-codex",
       "id": "gpt-5.4",
       "api": "openai-codex-responses",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "default"
@@ -90,7 +90,7 @@
       "provider": "openai-codex",
       "id": "gpt-5.4-mini",
       "api": "openai-codex-responses",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "default"

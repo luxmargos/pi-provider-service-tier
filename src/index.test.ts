@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -267,6 +267,13 @@ test("migrates config writes to v2 and drops legacy aggressiveProbe", () => {
     const config = readConfig(paths.user);
     assert.equal(config?.version, 2);
     assert.equal(config?.unknownModelBehavior, undefined);
+    const rawBeforeStartup = JSON.parse(readFileSync(paths.user, "utf8")) as Record<string, unknown>;
+    assert.equal(rawBeforeStartup.version, 1);
+    assert.equal(rawBeforeStartup.aggressiveProbe, true);
+    _test.migrateStartupFiles(paths);
+    const rawAfterStartup = JSON.parse(readFileSync(paths.user, "utf8")) as Record<string, unknown>;
+    assert.equal(rawAfterStartup.version, 2);
+    assert.equal("aggressiveProbe" in rawAfterStartup, false);
     writeConfig(paths.user, config ?? {});
     const written = readConfig(paths.user);
     assert.equal(written?.version, 2);
@@ -277,7 +284,7 @@ test("migrates config writes to v2 and drops legacy aggressiveProbe", () => {
   }
 });
 
-test("migrates v1 map by removing fully unsupported entries", () => {
+test("migrates v1 map by renaming supported to determined and removing fully unsupported entries", () => {
   const cwd = tempDir();
   const home = tempDir();
   try {
@@ -289,10 +296,19 @@ test("migrates v1 map by removing fully unsupported entries", () => {
         version: 1,
         entries: {
           "openai/gpt-5.5": buildPresetMapEntry(openAIModel),
+          "openai/gpt-legacy": {
+            provider: "openai",
+            id: "gpt-legacy",
+            api: "openai-responses",
+            supported: true,
+            tiers: ["priority"],
+            source: "preset",
+            updatedAt: new Date().toISOString(),
+          },
           "openai/gpt-old": {
             provider: "openai",
             id: "gpt-old",
-            supported: false,
+            determined: false,
             tiers: [],
             source: "error",
             updatedAt: new Date().toISOString(),
@@ -304,7 +320,18 @@ test("migrates v1 map by removing fully unsupported entries", () => {
     const map = readMap(paths.map);
     assert.equal(map?.version, 2);
     assert.equal(Boolean(map?.entries?.["openai/gpt-5.5"]), true);
+    assert.equal(map?.entries?.["openai/gpt-legacy"].determined, true);
+    assert.equal("supported" in (map?.entries?.["openai/gpt-legacy"] ?? {}), false);
     assert.equal(map?.entries?.["openai/gpt-old"], undefined);
+    const rawBeforeStartup = JSON.parse(readFileSync(paths.map, "utf8")) as { version?: number; entries?: Record<string, Record<string, unknown>> };
+    assert.equal(rawBeforeStartup.version, 1);
+    assert.equal(rawBeforeStartup.entries?.["openai/gpt-legacy"]?.supported, true);
+    _test.migrateStartupFiles(paths);
+    const rawAfterStartup = JSON.parse(readFileSync(paths.map, "utf8")) as { version?: number; entries?: Record<string, Record<string, unknown>> };
+    assert.equal(rawAfterStartup.version, 2);
+    assert.equal(rawAfterStartup.entries?.["openai/gpt-legacy"]?.determined, true);
+    assert.equal("supported" in (rawAfterStartup.entries?.["openai/gpt-legacy"] ?? {}), false);
+    assert.equal(rawAfterStartup.entries?.["openai/gpt-old"], undefined);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -319,13 +346,13 @@ test("uses preset map support for known OpenAI APIs and bundled probe presets", 
   assert.deepEqual(presetTiersForModel({ provider: "anthropic", api: "anthropic-messages" } as never), []);
 
   const entry = buildPresetMapEntry(codexModel);
-  assert.equal(entry.supported, true);
+  assert.equal(entry.determined, true);
   assert.equal(entry.source, "preset");
   assert.deepEqual(entry.tiers, ["priority", "default"]);
   assert.deepEqual(entry.unsupportedTiers, ["flex", "auto", "scale"]);
 
   const minimaxEntry = buildPresetMapEntry(opencodeMinimaxModel);
-  assert.equal(minimaxEntry.supported, false);
+  assert.equal(minimaxEntry.determined, false);
   assert.deepEqual(minimaxEntry.tiers, []);
 });
 
@@ -346,7 +373,7 @@ test("injects only when active and map-supported", () => {
   const unsupportedConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "flex" } } }, undefined, paths);
   const priorityOnlyEntry = buildPresetMapEntry(openAIModel);
   priorityOnlyEntry.tiers = ["priority"];
-  priorityOnlyEntry.supported = true;
+  priorityOnlyEntry.determined = true;
   const codexMap = { entries: { "openai/gpt-5.5": priorityOnlyEntry } };
   assert.equal(resolveTierForModel(unsupportedConfig, codexMap, openAIModel), undefined);
 });
@@ -408,7 +435,7 @@ test("detects unsupported service_tier errors and updates map without retry stat
 test("marks aggressive-once success as supported", () => {
   const map = { entries: { "openai/gpt-5.5": markTierUnsupported({ entries: {} }, "openai/gpt-5.5", "priority").entries?.["openai/gpt-5.5"]! } };
   const next = markTierSupported(map, "openai/gpt-5.5", "priority", openAIModel);
-  assert.equal(next.entries?.["openai/gpt-5.5"].supported, true);
+  assert.equal(next.entries?.["openai/gpt-5.5"].determined, false);
   assert.deepEqual(next.entries?.["openai/gpt-5.5"].tiers, ["priority"]);
   assert.equal(next.entries?.["openai/gpt-5.5"].unsupportedTiers?.includes("priority") ?? false, false);
 });
@@ -427,7 +454,7 @@ test("marks aggressive probe results with complete probe metadata", () => {
   assert.equal(next.entries?.["openai/gpt-5.5"].api, "openai-responses");
   assert.equal(next.entries?.["openai/gpt-5.5"].source, "probe");
   assert.equal(next.entries?.["openai/gpt-5.5"].error, "probe rejected: flex, auto, scale");
-  assert.equal(next.entries?.["openai/gpt-5.5"].supported, true);
+  assert.equal(next.entries?.["openai/gpt-5.5"].determined, true);
   assert.deepEqual(next.entries?.["openai/gpt-5.5"].tiers, ["priority", "default"]);
   assert.deepEqual(next.entries?.["openai/gpt-5.5"].unsupportedTiers, ["flex", "auto", "scale"]);
 });
@@ -451,7 +478,7 @@ test("can persist map entries", () => {
   try {
     const paths = configPaths(cwd, home);
     writeMap(paths.map, { entries: { "openai/gpt-5.5": buildPresetMapEntry(openAIModel) } });
-    assert.equal(readMap(paths.map)?.entries?.["openai/gpt-5.5"].supported, true);
+    assert.equal(readMap(paths.map)?.entries?.["openai/gpt-5.5"].determined, true);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -465,7 +492,7 @@ test("auto-seeds missing current-model map entry from presets", () => {
     const paths = configPaths(cwd, home);
     const seeded = _test.seedPresetMapEntryIfMissing(paths.map, { entries: {} }, codexModel);
     assert.deepEqual(seeded.entries?.["openai-codex/gpt-5.5"].tiers, ["priority", "default"]);
-    assert.equal(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"].supported, true);
+    assert.equal(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"].determined, true);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -511,6 +538,55 @@ test("session start does not seed presets passively", async () => {
   }
 });
 
+test("session start migrates map then refreshes non-probe entries from determined presets", async () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  const harness = createExtensionHarness(cwd, home, opencodeQwenModel);
+  try {
+    const paths = configPaths(cwd, home);
+    mkdirSync(dirname(paths.map), { recursive: true });
+    writeFileSync(
+      paths.map,
+      JSON.stringify({
+        version: 1,
+        entries: {
+          "opencode-go/qwen3.5-plus": {
+            provider: "opencode-go",
+            id: "qwen3.5-plus",
+            api: "openai-completions",
+            supported: false,
+            tiers: [],
+            source: "error",
+            updatedAt: new Date().toISOString(),
+          },
+          "opencode-go/minimax-m2.5": {
+            provider: "opencode-go",
+            id: "minimax-m2.5",
+            api: "anthropic-messages",
+            determined: false,
+            tiers: [],
+            unsupportedTiers: ["flex"],
+            source: "user-mark",
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      }),
+      "utf8",
+    );
+    await harness.handlers.get("session_start")?.({} as never, harness.ctx);
+    const map = JSON.parse(readFileSync(paths.map, "utf8")) as { entries: Record<string, Record<string, unknown>> };
+    assert.equal(map.entries["opencode-go/qwen3.5-plus"]?.source, "preset");
+    assert.equal(map.entries["opencode-go/qwen3.5-plus"]?.determined, true);
+    assert.equal("supported" in (map.entries["opencode-go/qwen3.5-plus"] ?? {}), false);
+    assert.equal(map.entries["opencode-go/minimax-m2.5"]?.source, "user-mark");
+    assert.equal(map.entries["opencode-go/minimax-m2.5"]?.determined, false);
+  } finally {
+    harness.restore();
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("fast command seeds preset support explicitly", async () => {
   const cwd = tempDir();
   const home = tempDir();
@@ -535,15 +611,130 @@ test("tier changes always refresh preset support before evaluating unknown suppo
     const paths = configPaths(cwd, home);
     const staleEntry = buildPresetMapEntry(codexModel);
     staleEntry.tiers = ["priority", "flex", "default"];
-    staleEntry.supported = true;
+    staleEntry.determined = true;
     writeMap(paths.map, { entries: { "openai-codex/gpt-5.5": staleEntry } });
     harness.selections.push("Leave unknown once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
     assert.deepEqual(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"].tiers, ["priority", "default"]);
     assert.equal(
-      harness.notifications.some(({ message }) => message.includes("will remain disabled")),
+      harness.notifications.some(({ message }) => message.includes("is not supported")),
       true,
     );
+  } finally {
+    harness.restore();
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("tier commands preserve probe map entries when requested tier is known", async () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
+  try {
+    const paths = configPaths(cwd, home);
+    const key = "opencode-go/minimax-m2.5";
+    writeMap(paths.map, markTierProbeResults({ entries: {} }, key, { priority: "supported", flex: "supported", default: "supported", auto: "supported", scale: "supported" }, opencodeMinimaxModel));
+    await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
+    const entry = readMap(paths.map)?.entries?.[key];
+    assert.equal(entry?.source, "probe");
+    assert.deepEqual(entry?.tiers, [...SERVICE_TIERS]);
+    const payload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "minimax-m2.5" } } as never, harness.ctx);
+    assert.deepEqual(payload, { model: "minimax-m2.5", service_tier: "flex" });
+  } finally {
+    harness.restore();
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("fast commands preserve probe map entries when priority is known", async () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
+  try {
+    const paths = configPaths(cwd, home);
+    const key = "opencode-go/minimax-m2.5";
+    writeMap(paths.map, markTierProbeResults({ entries: {} }, key, { priority: "supported", flex: "unsupported", default: "unsupported", auto: "unsupported", scale: "unsupported" }, opencodeMinimaxModel));
+    await harness.commands.get("fast-project")?.handler("on", harness.ctx);
+    const entry = readMap(paths.map)?.entries?.[key];
+    assert.equal(entry?.source, "probe");
+    assert.deepEqual(entry?.tiers, ["priority"]);
+    assert.deepEqual(entry?.unsupportedTiers, ["flex", "default", "auto", "scale"]);
+  } finally {
+    harness.restore();
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("probe-known unsupported tiers do not ask again", async () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
+  try {
+    const paths = configPaths(cwd, home);
+    const key = "opencode-go/minimax-m2.5";
+    writeMap(paths.map, markTierProbeResults({ entries: {} }, key, { priority: "supported", flex: "unsupported", default: "supported", auto: "unsupported", scale: "unsupported" }, opencodeMinimaxModel));
+    harness.selections.push("Use aggressive mode once");
+    await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
+    const entry = readMap(paths.map)?.entries?.[key];
+    assert.equal(entry?.source, "probe");
+    assert.deepEqual(entry?.tiers, ["priority", "default"]);
+    assert.deepEqual(entry?.unsupportedTiers, ["flex", "auto", "scale"]);
+    assert.deepEqual(harness.selections, ["Use aggressive mode once"]);
+    assert.equal(
+      harness.notifications.some(({ message }) => message.includes("is not supported")),
+      true,
+    );
+  } finally {
+    harness.restore();
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("leave unknown choices write user-mark entries for undetermined presets", async () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
+  try {
+    const paths = configPaths(cwd, home);
+    const key = "opencode-go/minimax-m2.5";
+    harness.selections.push("Leave unknown once");
+    await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
+    let entry = readMap(paths.map)?.entries?.[key];
+    assert.equal(entry?.source, "user-mark");
+    assert.equal(entry?.determined, false);
+    assert.deepEqual(entry?.tiers, []);
+    assert.deepEqual(entry?.unsupportedTiers, ["scale"]);
+
+    harness.selections.push("Use aggressive mode once");
+    await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
+    entry = readMap(paths.map)?.entries?.[key];
+    assert.equal(entry?.source, "user-mark");
+    assert.deepEqual(harness.selections, ["Use aggressive mode once"]);
+  } finally {
+    harness.restore();
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("leave unknown and do not ask again writes user-mark and unknown behavior", async () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
+  try {
+    const paths = configPaths(cwd, home);
+    const key = "opencode-go/minimax-m2.5";
+    harness.selections.push("Leave unknown and do not ask again");
+    await harness.commands.get("service-tier-project")?.handler("scale", harness.ctx);
+    const entry = readMap(paths.map)?.entries?.[key];
+    assert.equal(entry?.source, "user-mark");
+    assert.equal(entry?.determined, false);
+    assert.deepEqual(entry?.unsupportedTiers, ["scale"]);
+    assert.equal(readConfig(paths.user)?.unknownModelBehavior, "unknown");
   } finally {
     harness.restore();
     rmSync(cwd, { recursive: true, force: true });
@@ -558,11 +749,11 @@ test("refresh and unset support commands write preset then make support unknown"
   try {
     const paths = configPaths(cwd, home);
     await harness.commands.get("service-tier-refresh-support")?.handler("", harness.ctx);
-    assert.equal(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"].supported, true);
+    assert.equal(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"].determined, true);
     await harness.commands.get("service-tier-unset-support")?.handler("", harness.ctx);
     assert.equal(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"], undefined);
     await harness.commands.get("service-tier-refresh-support-all")?.handler("", harness.ctx);
-    assert.equal(readMap(paths.map)?.entries?.["openai/gpt-5.5"].supported, true);
+    assert.equal(readMap(paths.map)?.entries?.["openai/gpt-5.5"].determined, true);
     await harness.commands.get("service-tier-unset-support-all")?.handler("", harness.ctx);
     assert.deepEqual(readMap(paths.map)?.entries, {});
   } finally {
@@ -591,7 +782,7 @@ test("unknown behavior command persists to user config", async () => {
 test("ask flow runs aggressive-once probe immediately and persists success", async () => {
   const cwd = tempDir();
   const home = tempDir();
-  const harness = createExtensionHarness(cwd, home, codexModel);
+  const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
   const probedTiers: string[] = [];
   const restoreProbe = _test.setProbeTierForTest(async (_model, tier) => {
     probedTiers.push(tier);
@@ -601,21 +792,21 @@ test("ask flow runs aggressive-once probe immediately and persists success", asy
     const paths = configPaths(cwd, home);
     harness.selections.push("Use aggressive mode once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
-    const entry = readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"];
+    const entry = readMap(paths.map)?.entries?.["opencode-go/minimax-m2.5"];
     assert.deepEqual(probedTiers, [...SERVICE_TIERS]);
-    assert.equal(entry?.provider, "openai-codex");
-    assert.equal(entry?.id, "gpt-5.5");
-    assert.equal(entry?.api, "openai-codex-responses");
+    assert.equal(entry?.provider, "opencode-go");
+    assert.equal(entry?.id, "minimax-m2.5");
+    assert.equal(entry?.api, "anthropic-messages");
     assert.equal(entry?.source, "probe");
-    assert.equal(entry?.supported, true);
+    assert.equal(entry?.determined, true);
     assert.deepEqual(entry?.tiers, [...SERVICE_TIERS]);
     assert.equal(entry?.unsupportedTiers, undefined);
     assert.equal(
       harness.notifications.some(({ message }) => message.includes("aggressive probe started")),
       true,
     );
-    const secondPayload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "gpt-5.5" } } as never, harness.ctx);
-    assert.deepEqual(secondPayload, { model: "gpt-5.5", service_tier: "flex" });
+    const secondPayload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "minimax-m2.5" } } as never, harness.ctx);
+    assert.deepEqual(secondPayload, { model: "minimax-m2.5", service_tier: "flex" });
   } finally {
     restoreProbe();
     harness.restore();
@@ -627,7 +818,7 @@ test("ask flow runs aggressive-once probe immediately and persists success", asy
 test("aggressive probe shows and clears probing status", async () => {
   const cwd = tempDir();
   const home = tempDir();
-  const harness = createExtensionHarness(cwd, home, codexModel);
+  const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
   const restoreProbe = _test.setProbeTierForTest(async () => "supported");
   try {
     harness.selections.push("Use aggressive mode once");
@@ -674,15 +865,16 @@ test("aggressive behavior probes all tiers even when selected tier is preset-sup
 test("aggressive probe leaves map unchanged when any tier is unknown", async () => {
   const cwd = tempDir();
   const home = tempDir();
-  const harness = createExtensionHarness(cwd, home, codexModel);
+  const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
   const restoreProbe = _test.setProbeTierForTest(async (_model, tier) => (tier === "auto" ? "unknown" : "supported"));
   try {
     const paths = configPaths(cwd, home);
     harness.selections.push("Use aggressive mode once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
-    const entry = readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"];
+    const entry = readMap(paths.map)?.entries?.["opencode-go/minimax-m2.5"];
     assert.equal(entry?.source, "preset");
-    assert.deepEqual(entry?.tiers, ["priority", "default"]);
+    assert.equal(entry?.determined, false);
+    assert.deepEqual(entry?.tiers, []);
     assert.equal(
       harness.notifications.some(({ message }) => message.includes("did not determine auto")),
       true,
@@ -698,7 +890,7 @@ test("aggressive probe leaves map unchanged when any tier is unknown", async () 
 test("ask flow aggressive always probes immediately and keeps aggressive behavior", async () => {
   const cwd = tempDir();
   const home = tempDir();
-  const harness = createExtensionHarness(cwd, home, codexModel);
+  const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
   const probedTiers: string[] = [];
   const restoreProbe = _test.setProbeTierForTest(async (_model, tier) => {
     probedTiers.push(tier);
@@ -709,13 +901,13 @@ test("ask flow aggressive always probes immediately and keeps aggressive behavio
     harness.selections.push("Use aggressive mode and do not ask again");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
     assert.equal(readConfig(paths.user)?.unknownModelBehavior, "aggressive");
-    const entry = readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"];
+    const entry = readMap(paths.map)?.entries?.["opencode-go/minimax-m2.5"];
     assert.deepEqual(probedTiers, [...SERVICE_TIERS]);
-    assert.equal(entry?.provider, "openai-codex");
-    assert.equal(entry?.id, "gpt-5.5");
-    assert.equal(entry?.api, "openai-codex-responses");
+    assert.equal(entry?.provider, "opencode-go");
+    assert.equal(entry?.id, "minimax-m2.5");
+    assert.equal(entry?.api, "anthropic-messages");
     assert.equal(entry?.source, "probe");
-    assert.equal(entry?.supported, false);
+    assert.equal(entry?.determined, true);
     assert.deepEqual(entry?.tiers, []);
     assert.deepEqual(entry?.unsupportedTiers, [...SERVICE_TIERS]);
     assert.equal(entry?.error, "service_tier aggressive probe rejected: priority, flex, default, auto, scale");

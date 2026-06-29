@@ -47,7 +47,7 @@ export const UNKNOWN_MODEL_BEHAVIORS = ["ask", "aggressive", "unknown"] as const
 export type UnknownModelBehavior = (typeof UNKNOWN_MODEL_BEHAVIORS)[number];
 
 export type ConfigScope = "project" | "user";
-export type MapSource = "preset" | "probe" | "error" | "manual";
+export type MapSource = "preset" | "probe" | "error" | "manual" | "user-mark";
 
 export interface ServiceTierEntry {
   active?: boolean;
@@ -76,7 +76,7 @@ export interface ServiceTierMapEntry {
   provider: string;
   id: string;
   api?: string;
-  supported: boolean;
+  determined: boolean;
   tiers: ServiceTier[];
   unsupportedTiers?: ServiceTier[];
   source: MapSource;
@@ -123,6 +123,10 @@ function uniqueTiers(values: readonly ServiceTier[]): ServiceTier[] {
   return SERVICE_TIERS.filter((tier) => values.includes(tier));
 }
 
+function hasCompleteTierKnowledge(tiers: readonly ServiceTier[], unsupportedTiers: readonly ServiceTier[] = []): boolean {
+  return SERVICE_TIERS.every((tier) => tiers.includes(tier) || unsupportedTiers.includes(tier));
+}
+
 function parseEntry(value: unknown): ServiceTierEntry | undefined {
   if (!isRecord(value)) return undefined;
   const entry: ServiceTierEntry = {};
@@ -154,14 +158,26 @@ function normalizeMapEntry(key: string, value: unknown): ServiceTierMapEntry | u
     ? uniqueTiers(value.unsupportedTiers.filter(isServiceTier))
     : undefined;
   const source =
-    value.source === "preset" || value.source === "probe" || value.source === "error" || value.source === "manual"
+    value.source === "preset" ||
+    value.source === "probe" ||
+    value.source === "error" ||
+    value.source === "manual" ||
+    value.source === "user-mark"
       ? value.source
       : "manual";
+  const determined =
+    typeof value.determined === "boolean"
+      ? value.determined
+      : source === "probe"
+        ? hasCompleteTierKnowledge(tiers, unsupportedTiers)
+        : typeof value.supported === "boolean"
+          ? value.supported
+          : tiers.length > 0;
   return {
     provider,
     id,
     ...(typeof value.api === "string" ? { api: value.api } : {}),
-    supported: typeof value.supported === "boolean" ? value.supported : tiers.length > 0,
+    determined,
     tiers,
     ...(unsupportedTiers && unsupportedTiers.length > 0 ? { unsupportedTiers } : {}),
     source,
@@ -206,7 +222,7 @@ function loadBundledPresetEntries(): Record<string, ServiceTierMapEntry> {
 
 const BUNDLED_PRESET_ENTRIES = loadBundledPresetEntries();
 
-type PresetLookupModel = Pick<Model<Api>, "provider" | "api"> & Partial<Pick<Model<Api>, "id">>;
+type PresetLookupModel = Pick<Model<Api>, "provider"> & Partial<Pick<Model<Api>, "id" | "api">>;
 
 function bundledPresetEntryForModel(model: PresetLookupModel): ServiceTierMapEntry | undefined {
   if (!model.id) return undefined;
@@ -270,20 +286,45 @@ function writeJsonFile(path: string, value: unknown): void {
   }
 }
 
-export function readConfig(path: string): ConfigFile | undefined {
-  const parsed = readJsonFile(path);
-  if (parsed === undefined) return undefined;
-  if (!isRecord(parsed)) return {};
-  const config: ConfigFile = { version: CONFIG_VERSION };
-  const rawUnknownBehavior = parsed.unknownModelBehavior ?? parsed.unsupportedModelBehavior;
+function rawFileVersion(value: unknown): number {
+  if (!isRecord(value)) return 1;
+  return typeof value.version === "number" && Number.isInteger(value.version) && value.version > 0 ? value.version : 1;
+}
+
+function migrateConfigV1ToV2(value: unknown): ConfigFile {
+  if (!isRecord(value)) return { ...DEFAULT_CONFIG };
+  const config: ConfigFile = { version: 2 };
+  const rawUnknownBehavior = value.unknownModelBehavior ?? value.unsupportedModelBehavior;
   if (isUnknownModelBehavior(rawUnknownBehavior)) {
     config.unknownModelBehavior = rawUnknownBehavior;
   } else if (rawUnknownBehavior === "unsupported") {
     config.unknownModelBehavior = "unknown";
   }
-  const entries = normalizeEntries(parsed.entries);
+  const entries = normalizeEntries(value.entries);
   if (entries !== undefined) config.entries = entries;
   return config;
+}
+
+function migrateConfigToCurrent(value: unknown): ConfigFile {
+  let version = rawFileVersion(value);
+  let next: unknown = value;
+  while (version < CONFIG_VERSION) {
+    if (version === 1) {
+      next = migrateConfigV1ToV2(next);
+      version = 2;
+      continue;
+    }
+    break;
+  }
+  if (!isRecord(next)) return { version: CONFIG_VERSION };
+  const config = migrateConfigV1ToV2(next);
+  return { ...config, version: CONFIG_VERSION };
+}
+
+export function readConfig(path: string): ConfigFile | undefined {
+  const parsed = readJsonFile(path);
+  if (parsed === undefined) return undefined;
+  return migrateConfigToCurrent(parsed);
 }
 
 export function writeConfig(path: string, config: ConfigFile): void {
@@ -294,6 +335,15 @@ export function writeConfig(path: string, config: ConfigFile): void {
   });
 }
 
+function migrateConfigFile(path: string): ConfigFile | undefined {
+  if (!existsSync(path)) return undefined;
+  const parsed = readJsonFile(path);
+  if (parsed === undefined) return undefined;
+  const migrated = migrateConfigToCurrent(parsed);
+  writeConfig(path, migrated);
+  return migrated;
+}
+
 export function ensureConfig(path: string): ConfigFile {
   const existing = readConfig(path);
   if (existing) return existing;
@@ -301,19 +351,44 @@ export function ensureConfig(path: string): ConfigFile {
   return { ...DEFAULT_CONFIG };
 }
 
+function migrateMapV1ToV2(value: unknown): ServiceTierMapFile {
+  if (!isRecord(value)) return { ...DEFAULT_MAP };
+  const migratedEntries: Record<string, ServiceTierMapEntry> = {};
+  const entries = normalizeMapEntries(value.entries) ?? {};
+  for (const [key, entry] of Object.entries(entries)) {
+    if (
+      entry.source !== "user-mark" &&
+      !entry.determined &&
+      entry.tiers.length === 0 &&
+      !buildPresetMapEntry(entry).determined
+    ) {
+      continue;
+    }
+    migratedEntries[key] = entry;
+  }
+  return { version: 2, entries: migratedEntries };
+}
+
+function migrateMapToCurrent(value: unknown): ServiceTierMapFile {
+  let version = rawFileVersion(value);
+  let next: unknown = value;
+  while (version < MAP_VERSION) {
+    if (version === 1) {
+      next = migrateMapV1ToV2(next);
+      version = 2;
+      continue;
+    }
+    break;
+  }
+  if (!isRecord(next)) return { version: MAP_VERSION, entries: {} };
+  if (rawFileVersion(next) < MAP_VERSION) return migrateMapV1ToV2(next);
+  return { version: MAP_VERSION, entries: normalizeMapEntries(next.entries) ?? {} };
+}
+
 export function readMap(path: string): ServiceTierMapFile | undefined {
   const parsed = readJsonFile(path);
   if (parsed === undefined) return undefined;
-  if (!isRecord(parsed)) return {};
-  const parsedVersion = typeof parsed.version === "number" ? parsed.version : 1;
-  const migratedEntries: Record<string, ServiceTierMapEntry> = {};
-  const entries = normalizeMapEntries(parsed.entries) ?? {};
-  for (const [key, entry] of Object.entries(entries)) {
-    if (parsedVersion < MAP_VERSION && !entry.supported) continue;
-    migratedEntries[key] = entry;
-  }
-  const map: ServiceTierMapFile = { version: MAP_VERSION, entries: migratedEntries };
-  return map;
+  return migrateMapToCurrent(parsed);
 }
 
 export function writeMap(path: string, map: ServiceTierMapFile): void {
@@ -321,6 +396,15 @@ export function writeMap(path: string, map: ServiceTierMapFile): void {
     version: MAP_VERSION,
     entries: map.entries ?? {},
   });
+}
+
+function migrateMapFile(path: string): ServiceTierMapFile | undefined {
+  if (!existsSync(path)) return undefined;
+  const parsed = readJsonFile(path);
+  if (parsed === undefined) return undefined;
+  const migrated = migrateMapToCurrent(parsed);
+  writeMap(path, migrated);
+  return migrated;
 }
 
 export function ensureMap(path: string): ServiceTierMapFile {
@@ -397,15 +481,15 @@ export function presetTiersForModel(model: PresetLookupModel): ServiceTier[] {
   return [];
 }
 
-export function buildPresetMapEntry(model: Pick<Model<Api>, "provider" | "id" | "api">): ServiceTierMapEntry {
+export function buildPresetMapEntry(model: Pick<Model<Api>, "provider" | "id"> & Partial<Pick<Model<Api>, "api">>): ServiceTierMapEntry {
   const bundled = bundledPresetEntryForModel(model);
   if (bundled) return bundled;
   const tiers = presetTiersForModel(model);
   return {
     provider: model.provider,
     id: model.id,
-    api: model.api,
-    supported: tiers.length > 0,
+    ...(model.api ? { api: model.api } : {}),
+    determined: tiers.length > 0,
     tiers,
     source: "preset",
     updatedAt: new Date().toISOString(),
@@ -415,7 +499,7 @@ export function buildPresetMapEntry(model: Pick<Model<Api>, "provider" | "id" | 
 export function mapSupportsTier(map: ServiceTierMapFile | undefined, key: string | undefined, tier: ServiceTier | undefined): boolean {
   if (!map?.entries || !key || !tier) return false;
   const entry = map.entries[key];
-  if (!entry || !entry.supported) return false;
+  if (!entry || !entry.determined) return false;
   if (entry.unsupportedTiers?.includes(tier)) return false;
   return entry.tiers.includes(tier);
 }
@@ -429,6 +513,11 @@ export function mapSupportState(
   const entry = map.entries[key];
   if (!entry) return "unknown";
   return mapSupportsTier(map, key, tier) ? "supported" : "unknown";
+}
+
+function probeEntryKnowsTier(entry: ServiceTierMapEntry | undefined, tier: ServiceTier | undefined): boolean {
+  if (!entry || !tier || entry.source !== "probe") return false;
+  return entry.tiers.includes(tier) || (entry.unsupportedTiers?.includes(tier) ?? false);
 }
 
 export function configuredTierForModel(config: EffectiveConfig, model: Model<Api> | undefined): ServiceTier | undefined {
@@ -465,7 +554,7 @@ export function markTierUnsupported(map: ServiceTierMapFile, key: string, tier: 
     provider: existing?.provider ?? parsed.provider,
     id: existing?.id ?? parsed.id,
     ...(existing?.api ? { api: existing.api } : {}),
-    supported: tiers.length > 0,
+    determined: false,
     tiers,
     unsupportedTiers,
     source: "error",
@@ -486,7 +575,7 @@ export function markTierSupported(map: ServiceTierMapFile, key: string, tier: Se
     provider: existing?.provider ?? parsed.provider,
     id: existing?.id ?? parsed.id,
     ...(model?.api || existing?.api ? { api: model?.api ?? existing?.api } : {}),
-    supported: true,
+    determined: existing?.determined ?? true,
     tiers,
     ...(unsupportedTiers.length > 0 ? { unsupportedTiers } : {}),
     source: existing?.source === "preset" ? "preset" : "manual",
@@ -512,12 +601,37 @@ export function markTierProbeResults(
     provider: model?.provider ?? existing?.provider ?? parsed.provider,
     id: model?.id ?? existing?.id ?? parsed.id,
     ...(model?.api || existing?.api ? { api: model?.api ?? existing?.api } : {}),
-    supported: tiers.length > 0,
+    determined: true,
     tiers,
     ...(unsupportedTiers.length > 0 ? { unsupportedTiers } : {}),
     source: "probe",
     updatedAt: new Date().toISOString(),
     ...(error ? { error } : {}),
+  };
+  return { version: MAP_VERSION, entries };
+}
+
+export function markTierUserMarked(
+  map: ServiceTierMapFile,
+  key: string,
+  tier: ServiceTier,
+  model?: Pick<Model<Api>, "provider" | "id" | "api">,
+): ServiceTierMapFile {
+  const parsed = parseModelKey(key);
+  if (!parsed) return map;
+  const entries = { ...(map.entries ?? {}) };
+  const existing = entries[key];
+  entries[key] = {
+    provider: model?.provider ?? existing?.provider ?? parsed.provider,
+    id: model?.id ?? existing?.id ?? parsed.id,
+    ...(model?.api || existing?.api ? { api: model?.api ?? existing?.api } : {}),
+    determined: false,
+    tiers: [...(existing?.tiers ?? [])],
+    ...(existing?.unsupportedTiers && existing.unsupportedTiers.length > 0
+      ? { unsupportedTiers: [...existing.unsupportedTiers] }
+      : {}),
+    source: "user-mark",
+    updatedAt: new Date().toISOString(),
   };
   return { version: MAP_VERSION, entries };
 }
@@ -559,15 +673,42 @@ function seedPresetMapEntryIfMissing(path: string, map: ServiceTierMapFile, mode
   return next;
 }
 
-function refreshPresetMapEntry(path: string, map: ServiceTierMapFile, model: Model<Api> | undefined): ServiceTierMapFile {
+function refreshPresetMapEntry(
+  path: string,
+  map: ServiceTierMapFile,
+  model: Model<Api> | undefined,
+  preserveKnownProbeTier?: ServiceTier,
+): ServiceTierMapFile {
   const key = modelKey(model);
   if (!model || !key) return map;
+  if (probeEntryKnowsTier(map.entries?.[key], preserveKnownProbeTier)) return map;
+  const preset = buildPresetMapEntry(model);
+  if (map.entries?.[key]?.source === "user-mark" && !preset.determined) return map;
   const next = {
     version: MAP_VERSION,
-    entries: { ...(map.entries ?? {}), [key]: buildPresetMapEntry(model) },
+    entries: { ...(map.entries ?? {}), [key]: preset },
   };
   writeMap(path, next);
   return next;
+}
+
+function refreshPresetKnowledgeForStoredEntries(path: string, map: ServiceTierMapFile): ServiceTierMapFile {
+  const entries = { ...(map.entries ?? {}) };
+  for (const [key, entry] of Object.entries(entries)) {
+    if (entry.source === "probe") continue;
+    const preset = buildPresetMapEntry(entry);
+    if (preset.determined) entries[key] = preset;
+  }
+  const next = { version: MAP_VERSION, entries };
+  writeMap(path, next);
+  return next;
+}
+
+function migrateStartupFiles(paths: ConfigPaths): ServiceTierMapFile {
+  migrateConfigFile(paths.user);
+  migrateConfigFile(paths.project);
+  const migratedMap = migrateMapFile(paths.map);
+  return migratedMap ?? ensureMap(paths.map);
 }
 
 function loadState(ctx: ExtensionContext): { config: EffectiveConfig; map: ServiceTierMapFile } {
@@ -733,6 +874,16 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
     await runAggressiveProbeForCurrentTier(ctx, key, tier);
     return;
   }
+  const mapEntry = map.entries?.[key];
+  if (mapEntry?.determined) {
+    if (mapSupportsTier(map, key, tier)) return;
+    ctx.ui.notify(`service_tier=${tier} is not supported for ${key}; it will not be injected.`, "info");
+    return;
+  }
+  if (mapEntry?.source === "user-mark") {
+    ctx.ui.notify(`service_tier=${tier} was left unknown for ${key}; it will not be injected.`, "info");
+    return;
+  }
   if (mapSupportState(map, key, tier) !== "unknown") return;
   if (config.unknownModelBehavior === "unknown") {
     ctx.ui.notify(`service_tier=${tier} support is unknown for ${key}; it will not be injected.`, "info");
@@ -756,10 +907,17 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
     return;
   }
   if (choice === LEAVE_ONCE_CHOICE) {
+    if (ctx.model && !buildPresetMapEntry(ctx.model).determined) {
+      writeMap(paths.map, markTierUserMarked(ensureMap(paths.map), key, tier, ctx.model));
+      updateStatus(ctx);
+    }
     ctx.ui.notify(`service_tier=${tier} will remain disabled for ${key} this time.`, "info");
     return;
   }
   if (choice === LEAVE_ALWAYS_CHOICE) {
+    if (ctx.model && !buildPresetMapEntry(ctx.model).determined) {
+      writeMap(paths.map, markTierUserMarked(ensureMap(paths.map), key, tier, ctx.model));
+    }
     setScopedUnknownModelBehavior(paths, "user", "unknown");
     updateStatus(ctx);
     ctx.ui.notify("user-global unknownModelBehavior set to unknown.", "info");
@@ -786,7 +944,7 @@ function notifyScopeStatus(ctx: ExtensionCommandContext, scope: ConfigScope): vo
     [
       `${scope} service tier for ${key}: ${scoped?.active ? scoped.serviceTier ?? "priority" : scoped?.active === false ? "off" : "unset"}`,
       `effective: ${effective?.active ? effective.serviceTier : "off"}`,
-      `map: ${mapEntry ? (mapEntry.supported ? mapEntry.tiers.join(", ") || "none" : "unknown") : "unknown"}`,
+      `map: ${mapEntry ? (mapEntry.determined ? mapEntry.tiers.join(", ") || "none" : "unknown") : "unknown"}`,
       `support: ${support}`,
       `unknownBehavior: ${config.unknownModelBehavior}`,
     ].join("; "),
@@ -879,7 +1037,7 @@ async function handleTierCommand(scope: ConfigScope, args: string, ctx: Extensio
   }
   if (isServiceTier(arg)) {
     setScopedEntry(paths, scope, key, { active: true, serviceTier: arg });
-    refreshPresetMapEntry(paths.map, ensureMap(paths.map), ctx.model);
+    refreshPresetMapEntry(paths.map, ensureMap(paths.map), ctx.model, arg);
     updateStatus(ctx);
     ctx.ui.notify(`${scope} service tier ${arg} enabled for ${key}.`, "info");
     await evaluateUnsupportedAfterExplicitCommand(ctx, key, arg);
@@ -901,7 +1059,7 @@ async function handleFastCommand(scope: ConfigScope, args: string, ctx: Extensio
   const scopedEntry = readScopeConfig(paths, scope).entries?.[key];
   const turnOn = arg === "on" ? true : arg === "off" ? false : !(scopedEntry?.active && scopedEntry.serviceTier === "priority");
   setScopedEntry(paths, scope, key, turnOn ? { active: true, serviceTier: "priority" } : { active: false });
-  if (turnOn) refreshPresetMapEntry(paths.map, ensureMap(paths.map), ctx.model);
+  if (turnOn) refreshPresetMapEntry(paths.map, ensureMap(paths.map), ctx.model, "priority");
   updateStatus(ctx);
   ctx.ui.notify(`${scope} fast mode ${turnOn ? "enabled" : "disabled"} for ${key}.`, "info");
   if (turnOn) await evaluateUnsupportedAfterExplicitCommand(ctx, key, "priority");
@@ -1119,7 +1277,8 @@ export default function piServiceTier(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     installCommandArgumentAutocomplete(ctx);
     const paths = getPaths(ctx);
-    ensureMap(paths.map);
+    refreshPresetKnowledgeForStoredEntries(paths.map, migrateStartupFiles(paths));
+    invalidateStateCache();
     refreshStatus(ctx);
   });
 
@@ -1218,8 +1377,12 @@ export const _test = {
   payloadWithServiceTier,
   statusText,
   colorStatus,
+  migrateConfigToCurrent,
+  migrateMapToCurrent,
+  migrateStartupFiles,
   seedPresetMapEntryIfMissing,
   refreshPresetMapEntry,
+  refreshPresetKnowledgeForStoredEntries,
   runAggressiveProbeForCurrentTier,
   setProbeTierForTest,
 };

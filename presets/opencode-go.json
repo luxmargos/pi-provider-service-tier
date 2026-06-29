@@ -1,11 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "entries": {
     "opencode-go/deepseek-v4-flash": {
       "provider": "opencode-go",
       "id": "deepseek-v4-flash",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
@@ -20,7 +20,7 @@
       "provider": "opencode-go",
       "id": "deepseek-v4-pro",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
@@ -35,7 +35,7 @@
       "provider": "opencode-go",
       "id": "glm-5",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
@@ -50,7 +50,7 @@
       "provider": "opencode-go",
       "id": "glm-5.1",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
@@ -65,7 +65,7 @@
       "provider": "opencode-go",
       "id": "kimi-k2.5",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
@@ -80,7 +80,7 @@
       "provider": "opencode-go",
       "id": "kimi-k2.6",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
@@ -95,7 +95,7 @@
       "provider": "opencode-go",
       "id": "mimo-v2.5",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
@@ -110,7 +110,7 @@
       "provider": "opencode-go",
       "id": "mimo-v2.5-pro",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
@@ -125,7 +125,7 @@
       "provider": "opencode-go",
       "id": "minimax-m2.5",
       "api": "anthropic-messages",
-      "supported": false,
+      "determined": false,
       "tiers": [],
       "unsupportedTiers": [
         "scale"
@@ -137,7 +137,7 @@
       "provider": "opencode-go",
       "id": "minimax-m2.7",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
@@ -152,7 +152,7 @@
       "provider": "opencode-go",
       "id": "qwen3.5-plus",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
@@ -166,7 +166,7 @@
       "provider": "opencode-go",
       "id": "qwen3.6-plus",
       "api": "openai-completions",
-      "supported": true,
+      "determined": true,
       "tiers": [
         "priority",
         "flex",
