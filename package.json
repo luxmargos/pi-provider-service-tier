@@ -1,6 +1,6 @@
 {
   "name": "pi-provider-service-tier",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Provider/model-scoped service_tier management extension for Pi",
   "type": "module",
   "license": "MIT",
@@ -14,6 +14,7 @@
     "src/index.ts",
     "presets/*.json",
     "scripts/*.mjs",
+    "CHANGELOG.md",
     "README.md"
   ],
   "pi": {
