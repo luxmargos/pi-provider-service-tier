@@ -592,6 +592,27 @@ test("ask flow runs aggressive-once probe immediately and persists success", asy
   }
 });
 
+test("aggressive probe shows and clears probing status", async () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  const harness = createExtensionHarness(cwd, home, codexModel);
+  const restoreProbe = _test.setProbeTierForTest(async () => "supported");
+  try {
+    harness.selections.push("Use aggressive mode once");
+    await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
+    assert.equal(
+      harness.statuses.some(({ value }) => value?.includes("probing flex")),
+      true,
+    );
+    assert.equal(harness.statuses.at(-1)?.value?.includes("probing flex"), false);
+  } finally {
+    restoreProbe();
+    harness.restore();
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("ask flow aggressive always probes immediately and keeps aggressive behavior", async () => {
   const cwd = tempDir();
   const home = tempDir();

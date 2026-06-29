@@ -24,6 +24,8 @@ const CONFIG_VERSION = 2;
 const MAP_VERSION = 2;
 const PROBE_TIMEOUT_MS = 30_000;
 const PROBE_TIMEOUT = Symbol("probe-timeout");
+const PROBE_STATUS_INTERVAL_MS = 120;
+const PROBE_STATUS_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 
 const COMMAND_FAST_PROJECT = "service-tier-fast-project";
 const COMMAND_FAST_USER = "service-tier-fast-user";
@@ -552,6 +554,21 @@ function updateStatus(ctx: ExtensionContext): void {
   ctx.ui.setStatus(STATUS_KEY, statusText(config, map, ctx.model) ?? undefined);
 }
 
+function startProbeStatus(ctx: ExtensionContext, tier: ServiceTier): () => void {
+  let index = 0;
+  const render = () => {
+    const frame = PROBE_STATUS_FRAMES[index % PROBE_STATUS_FRAMES.length];
+    ctx.ui.setStatus(STATUS_KEY, colorStatus(`${frame} probing ${tier}`));
+    index += 1;
+  };
+  render();
+  const timer = setInterval(render, PROBE_STATUS_INTERVAL_MS);
+  return () => {
+    clearInterval(timer);
+    updateStatus(ctx);
+  };
+}
+
 type ProbeTierResult = "supported" | "unsupported" | "unknown";
 type ProbeTierFunction = (model: Model<Api>, tier: ServiceTier, ctx: ExtensionCommandContext) => Promise<ProbeTierResult>;
 
@@ -619,7 +636,13 @@ async function runAggressiveProbeForCurrentTier(ctx: ExtensionCommandContext, ke
   }
   const paths = getPaths(ctx);
   ctx.ui.notify(`service_tier=${tier} aggressive probe started for ${key}; waiting for provider result...`, "warning");
-  const result = await probeTier(ctx.model, tier, ctx);
+  const stopProbeStatus = startProbeStatus(ctx, tier);
+  let result: ProbeTierResult;
+  try {
+    result = await probeTier(ctx.model, tier, ctx);
+  } finally {
+    stopProbeStatus();
+  }
   const map = ensureMap(paths.map);
   if (result === "supported") {
     writeMap(paths.map, markTierSupported(map, key, tier, ctx.model));
