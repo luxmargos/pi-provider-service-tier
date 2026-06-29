@@ -22,7 +22,7 @@ The extension only injects `service_tier` when all of these are true:
 
 1. the current `provider/model` pair is active in the effective config,
 2. a service tier is configured for that pair, and
-3. the support map says that tier is supported for that pair, or unsupported behavior explicitly authorizes an aggressive injection.
+3. the support map says that tier is supported for that pair, or unknown behavior explicitly authorizes an aggressive injection.
 
 > [!NOTE]
 > This extension injects the provider payload field `service_tier`. For Pi's built-in OpenAI providers, Pi also has an internal `serviceTier` stream option used for cost accounting. This extension is intentionally broader and payload-hook based, so it does not adjust Pi's internal cost multiplier.
@@ -224,7 +224,7 @@ Refresh commands are preset-only and do not call providers. Unset commands do no
 
 `aggressive` injects the configured tier even when support is unknown. `unknown` leaves unknown tiers uninjected. The command writes user-global config.
 
-`Use aggressive mode once` and `Use aggressive mode and do not ask again` work on the next provider request and show progress notifications while the extension waits for the provider result. A successful assistant response marks the tier supported; a `service_tier` provider error keeps support unknown. The failed request is not retried.
+`Use aggressive mode once` and `Use aggressive mode and do not ask again` immediately run a low-token current-model probe and show progress notifications while the extension waits for the provider result. A successful probe marks the tier supported; a `service_tier` provider error keeps support unknown. The failed probe is not retried.
 
 ### Debug injection decisions
 
@@ -320,7 +320,7 @@ Preset support currently includes:
 | `openai-codex` + `openai-codex-responses` | fallback for other models | `priority` |
 | `opencode-go` + `openai-completions` | probed models in `presets/opencode-go.json` | model-specific; usually `priority`, `flex`, `default`, `auto`, `scale` |
 
-Other providers/models remain unknown unless refreshed from presets, learned from an unsupported provider error, or updated by an aggressive-once result.
+Other providers/models remain unknown unless refreshed from presets, learned from an unsupported provider error, or updated by an aggressive probe result.
 
 ## Unsupported tier errors
 

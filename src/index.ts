@@ -2,7 +2,13 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type Api, type Model } from "@earendil-works/pi-ai";
+import {
+  getApiProvider,
+  type Api,
+  type Context as ProviderContext,
+  type Model,
+  type SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const PACKAGE_NAME = "pi-provider-service-tier";
@@ -16,6 +22,8 @@ const ANSI_RESET = "\u001b[0m";
 const ANSI_GREEN = "\u001b[32m";
 const CONFIG_VERSION = 2;
 const MAP_VERSION = 2;
+const PROBE_TIMEOUT_MS = 30_000;
+const PROBE_TIMEOUT = Symbol("probe-timeout");
 
 const COMMAND_FAST_PROJECT = "service-tier-fast-project";
 const COMMAND_FAST_USER = "service-tier-fast-user";
@@ -94,7 +102,6 @@ interface LastAppliedTier {
   key: string;
   tier: ServiceTier;
   at: number;
-  aggressiveAttempt?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -545,33 +552,103 @@ function updateStatus(ctx: ExtensionContext): void {
   ctx.ui.setStatus(STATUS_KEY, statusText(config, map, ctx.model) ?? undefined);
 }
 
+type ProbeTierResult = "supported" | "unsupported" | "unknown";
+type ProbeTierFunction = (model: Model<Api>, tier: ServiceTier, ctx: ExtensionCommandContext) => Promise<ProbeTierResult>;
+
+async function defaultProbeTier(model: Model<Api>, tier: ServiceTier, ctx: ExtensionCommandContext): Promise<ProbeTierResult> {
+  const provider = getApiProvider(model.api);
+  if (!provider) return "unknown";
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok) return "unknown";
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const context: ProviderContext = {
+      messages: [{ role: "user", content: "Reply OK.", timestamp: Date.now() }],
+    };
+    const options: SimpleStreamOptions = {
+      apiKey: auth.apiKey,
+      headers: auth.headers,
+      maxTokens: 1,
+      signal: controller.signal,
+      onPayload: (payload) => payloadWithServiceTier(payload, tier) ?? payload,
+    };
+    const iterator = provider.streamSimple(model, context, options)[Symbol.asyncIterator]();
+    const timeoutPromise = new Promise<typeof PROBE_TIMEOUT>((resolve) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        resolve(PROBE_TIMEOUT);
+      }, PROBE_TIMEOUT_MS);
+    });
+
+    while (true) {
+      const next = await Promise.race([iterator.next(), timeoutPromise]);
+      if (next === PROBE_TIMEOUT) {
+        void iterator.return?.();
+        return "unknown";
+      }
+      if (next.done) return "supported";
+      const event = next.value;
+      if (event.type === "done") return "supported";
+      if (event.type === "error") {
+        return isUnsupportedServiceTierError(event.error.errorMessage) ? "unsupported" : "unknown";
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return isUnsupportedServiceTierError(message) ? "unsupported" : "unknown";
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+let probeTier: ProbeTierFunction = defaultProbeTier;
+
+function setProbeTierForTest(next: ProbeTierFunction): () => void {
+  const previous = probeTier;
+  probeTier = next;
+  return () => {
+    probeTier = previous;
+  };
+}
+
+async function runAggressiveProbeForCurrentTier(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<ProbeTierResult> {
+  if (!ctx.model) {
+    ctx.ui.notify("No current model selected.", "error");
+    return "unknown";
+  }
+  const paths = getPaths(ctx);
+  ctx.ui.notify(`service_tier=${tier} aggressive probe started for ${key}; waiting for provider result...`, "warning");
+  const result = await probeTier(ctx.model, tier, ctx);
+  const map = ensureMap(paths.map);
+  if (result === "supported") {
+    writeMap(paths.map, markTierSupported(map, key, tier, ctx.model));
+    updateStatus(ctx);
+    ctx.ui.notify(`service_tier=${tier} is supported for ${key}; updated ${MAP_BASENAME}.`, "info");
+    return result;
+  }
+  if (result === "unsupported") {
+    writeMap(paths.map, markTierUnsupported(map, key, tier, "service_tier aggressive probe was not accepted"));
+    updateStatus(ctx);
+    ctx.ui.notify(`service_tier=${tier} support remains unknown for ${key}; updated ${MAP_BASENAME}.`, "warning");
+    return result;
+  }
+  ctx.ui.notify(`service_tier=${tier} aggressive probe for ${key} did not determine support; ${MAP_BASENAME} was not changed.`, "warning");
+  return result;
+}
+
 const AGGRESSIVE_ONCE_CHOICE = "Use aggressive mode once";
 const AGGRESSIVE_ALWAYS_CHOICE = "Use aggressive mode and do not ask again";
 const LEAVE_ONCE_CHOICE = "Leave unknown once";
 const LEAVE_ALWAYS_CHOICE = "Leave unknown and do not ask again";
 const UNSUPPORTED_PROMPT_CHOICES = [AGGRESSIVE_ONCE_CHOICE, AGGRESSIVE_ALWAYS_CHOICE, LEAVE_ONCE_CHOICE, LEAVE_ALWAYS_CHOICE] as const;
-const aggressiveOnceAuthorizations = new Set<string>();
-
-function authorizationKey(key: string, tier: ServiceTier): string {
-  return `${key}#${tier}`;
-}
-
-function authorizeAggressiveOnce(key: string, tier: ServiceTier): void {
-  aggressiveOnceAuthorizations.add(authorizationKey(key, tier));
-}
-
-function consumeAggressiveOnce(key: string, tier: ServiceTier): boolean {
-  const value = authorizationKey(key, tier);
-  const authorized = aggressiveOnceAuthorizations.has(value);
-  if (authorized) aggressiveOnceAuthorizations.delete(value);
-  return authorized;
-}
 
 async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<void> {
   const { config, map } = loadState(ctx);
   if (mapSupportState(map, key, tier) !== "unknown") return;
   if (config.unknownModelBehavior === "aggressive") {
-    ctx.ui.notify(`service_tier=${tier} support is unknown for ${key}; aggressive behavior will inject it and record the result.`, "warning");
+    ctx.ui.notify(`service_tier=${tier} support is unknown for ${key}; aggressive behavior will probe it now.`, "warning");
+    await runAggressiveProbeForCurrentTier(ctx, key, tier);
     return;
   }
   if (config.unknownModelBehavior === "unknown") {
@@ -585,18 +662,14 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
   );
   const paths = getPaths(ctx);
   if (choice === AGGRESSIVE_ONCE_CHOICE) {
-    authorizeAggressiveOnce(key, tier);
-    ctx.ui.notify(`service_tier=${tier} will be injected on the next request for ${key}; waiting for provider result to update ${MAP_BASENAME}.`, "warning");
+    await runAggressiveProbeForCurrentTier(ctx, key, tier);
     return;
   }
   if (choice === AGGRESSIVE_ALWAYS_CHOICE) {
     setScopedUnknownModelBehavior(paths, "user", "aggressive");
-    authorizeAggressiveOnce(key, tier);
     updateStatus(ctx);
-    ctx.ui.notify(
-      `user-global unknownModelBehavior set to aggressive; service_tier=${tier} will be injected on the next request for ${key} and the result will be recorded.`,
-      "warning",
-    );
+    ctx.ui.notify(`user-global unknownModelBehavior set to aggressive; probing service_tier=${tier} for ${key} now.`, "warning");
+    await runAggressiveProbeForCurrentTier(ctx, key, tier);
     return;
   }
   if (choice === LEAVE_ONCE_CHOICE) {
@@ -982,10 +1055,8 @@ export default function piServiceTier(pi: ExtensionAPI): void {
     const key = modelKey(ctx.model);
     const tier = configuredTierForModel(config, ctx.model);
     const supported = mapSupportsTier(map, key, tier);
-    const aggressiveOnce = key && tier ? consumeAggressiveOnce(key, tier) : false;
     const aggressive = config.unknownModelBehavior === "aggressive";
-    const shouldInject = supported || aggressive || aggressiveOnce;
-    const aggressiveAttempt = !supported && (aggressive || aggressiveOnce);
+    const shouldInject = supported || aggressive;
     const nextPayload = tier ? payloadWithServiceTier(event.payload, tier) : undefined;
     if (!key || !tier || !shouldInject || nextPayload === undefined) {
       if (debugEnabled) {
@@ -997,13 +1068,7 @@ export default function piServiceTier(pi: ExtensionAPI): void {
       }
       return undefined;
     }
-    lastApplied = { key, tier, at: Date.now(), aggressiveAttempt: !!aggressiveAttempt };
-    if (aggressiveAttempt) {
-      ctx.ui.notify(
-        `service_tier=${tier} aggressive injection started for ${key}; waiting for provider result to update ${MAP_BASENAME}.`,
-        "warning",
-      );
-    }
+    lastApplied = { key, tier, at: Date.now() };
     if (debugEnabled) {
       ctx.ui.notify(`service_tier debug: injected service_tier=${tier} into ${key} request.`, "info");
     }
@@ -1018,27 +1083,20 @@ export default function piServiceTier(pi: ExtensionAPI): void {
       return;
     }
     const errorMessage = event.message.errorMessage;
-    if (lastApplied.aggressiveAttempt && errorMessage && !isUnsupportedServiceTierError(errorMessage)) {
+    if (!isUnsupportedServiceTierError(errorMessage)) {
       lastApplied = undefined;
       return;
     }
-    if (!isUnsupportedServiceTierError(errorMessage) && !lastApplied.aggressiveAttempt) return;
     const paths = getPaths(ctx);
     const map = ensureMap(paths.map);
-    const next = isUnsupportedServiceTierError(errorMessage)
-      ? markTierUnsupported(map, lastApplied.key, lastApplied.tier, errorMessage)
-      : markTierSupported(map, lastApplied.key, lastApplied.tier, ctx.model);
+    const next = markTierUnsupported(map, lastApplied.key, lastApplied.tier, errorMessage);
     writeMap(paths.map, next);
     invalidateStateCache();
     refreshStatus(ctx);
-    if (isUnsupportedServiceTierError(errorMessage)) {
-      ctx.ui.notify(
-        `service_tier=${lastApplied.tier} support remains unknown for ${lastApplied.key}; updated ${MAP_BASENAME}. The failed request was not retried.`,
-        "warning",
-      );
-    } else {
-      ctx.ui.notify(`service_tier=${lastApplied.tier} is supported for ${lastApplied.key}; updated ${MAP_BASENAME}.`, "info");
-    }
+    ctx.ui.notify(
+      `service_tier=${lastApplied.tier} support remains unknown for ${lastApplied.key}; updated ${MAP_BASENAME}. The failed request was not retried.`,
+      "warning",
+    );
     lastApplied = undefined;
   });
 }
@@ -1079,6 +1137,6 @@ export const _test = {
   colorStatus,
   seedPresetMapEntryIfMissing,
   refreshPresetMapEntry,
-  authorizeAggressiveOnce,
-  consumeAggressiveOnce,
+  runAggressiveProbeForCurrentTier,
+  setProbeTierForTest,
 };

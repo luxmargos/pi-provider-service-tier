@@ -568,47 +568,49 @@ test("unknown behavior command persists to user config", async () => {
   }
 });
 
-test("ask flow authorizes aggressive-once injection and persists success", async () => {
+test("ask flow runs aggressive-once probe immediately and persists success", async () => {
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home, codexModel);
+  const restoreProbe = _test.setProbeTierForTest(async () => "supported");
   try {
     const paths = configPaths(cwd, home);
     harness.selections.push("Use aggressive mode once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
-    const payload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "gpt-5.5" } } as never, harness.ctx);
-    assert.deepEqual(payload, { model: "gpt-5.5", service_tier: "flex" });
-    await harness.handlers.get("message_end")?.({ message: { role: "assistant" } } as never, harness.ctx);
     assert.equal(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"].tiers.includes("flex"), true);
     assert.equal(
-      harness.notifications.some(({ message }) => message.includes("aggressive injection started")),
+      harness.notifications.some(({ message }) => message.includes("aggressive probe started")),
       true,
     );
     const secondPayload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "gpt-5.5" } } as never, harness.ctx);
     assert.deepEqual(secondPayload, { model: "gpt-5.5", service_tier: "flex" });
   } finally {
+    restoreProbe();
     harness.restore();
     rmSync(cwd, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("ask flow aggressive always works on the next request and reports progress", async () => {
+test("ask flow aggressive always probes immediately and keeps aggressive behavior", async () => {
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home, codexModel);
+  const restoreProbe = _test.setProbeTierForTest(async () => "unsupported");
   try {
     const paths = configPaths(cwd, home);
     harness.selections.push("Use aggressive mode and do not ask again");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
     assert.equal(readConfig(paths.user)?.unknownModelBehavior, "aggressive");
-    const payload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "gpt-5.5" } } as never, harness.ctx);
-    assert.deepEqual(payload, { model: "gpt-5.5", service_tier: "flex" });
+    assert.equal(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"].unsupportedTiers?.includes("flex"), true);
     assert.equal(
-      harness.notifications.some(({ message }) => message.includes("waiting for provider result")),
+      harness.notifications.some(({ message }) => message.includes("aggressive probe started")),
       true,
     );
+    const payload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "gpt-5.5" } } as never, harness.ctx);
+    assert.deepEqual(payload, { model: "gpt-5.5", service_tier: "flex" });
   } finally {
+    restoreProbe();
     harness.restore();
     rmSync(cwd, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -630,6 +632,29 @@ test("unsupported errors update map without retry", async () => {
       harness.ctx,
     );
     assert.equal(readMap(paths.map)?.entries?.["openai/gpt-5.5"].unsupportedTiers?.includes("priority"), true);
+  } finally {
+    harness.restore();
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("request-time aggressive injection does not persist support on success", async () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  const harness = createExtensionHarness(cwd, home);
+  try {
+    const paths = configPaths(cwd, home);
+    writeConfig(paths.user, { unknownModelBehavior: "aggressive", entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } });
+    writeMap(paths.map, { entries: {} });
+    const payload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "gpt-5.5" } } as never, harness.ctx);
+    assert.deepEqual(payload, { model: "gpt-5.5", service_tier: "priority" });
+    await harness.handlers.get("message_end")?.({ message: { role: "assistant" } } as never, harness.ctx);
+    assert.equal(readMap(paths.map)?.entries?.["openai/gpt-5.5"], undefined);
+    assert.equal(
+      harness.notifications.some(({ message }) => message.includes("aggressive injection started")),
+      false,
+    );
   } finally {
     harness.restore();
     rmSync(cwd, { recursive: true, force: true });
