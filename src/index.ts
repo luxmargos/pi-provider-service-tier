@@ -15,6 +15,7 @@ const PACKAGE_NAME = "pi-provider-service-tier";
 const CONFIG_BASENAME = "pi-provider-service-tier.json";
 const MAP_BASENAME = "pi-provider-service-tier-map.json";
 const STATUS_KEY = "pi-provider-service-tier";
+const STATUS_LABEL = "service_tier";
 const STATUS_ICON = "⚡";
 const STATUS_OFF_ICON = "○";
 const STATUS_ACTIVE_ICON = "●";
@@ -494,6 +495,33 @@ export function markTierSupported(map: ServiceTierMapFile, key: string, tier: Se
   return { version: MAP_VERSION, entries };
 }
 
+export function markTierProbeResults(
+  map: ServiceTierMapFile,
+  key: string,
+  results: Record<ServiceTier, Exclude<ProbeTierResult, "unknown">>,
+  model?: Pick<Model<Api>, "provider" | "id" | "api">,
+  error?: string,
+): ServiceTierMapFile {
+  const parsed = parseModelKey(key);
+  if (!parsed) return map;
+  const entries = { ...(map.entries ?? {}) };
+  const existing = entries[key];
+  const tiers = SERVICE_TIERS.filter((tier) => results[tier] === "supported");
+  const unsupportedTiers = SERVICE_TIERS.filter((tier) => results[tier] === "unsupported");
+  entries[key] = {
+    provider: model?.provider ?? existing?.provider ?? parsed.provider,
+    id: model?.id ?? existing?.id ?? parsed.id,
+    ...(model?.api || existing?.api ? { api: model?.api ?? existing?.api } : {}),
+    supported: tiers.length > 0,
+    tiers,
+    ...(unsupportedTiers.length > 0 ? { unsupportedTiers } : {}),
+    source: "probe",
+    updatedAt: new Date().toISOString(),
+    ...(error ? { error } : {}),
+  };
+  return { version: MAP_VERSION, entries };
+}
+
 function colorStatus(text: string, color?: "green"): string {
   if (!color) return text;
   if (process.env.NO_COLOR) return text;
@@ -504,11 +532,11 @@ function statusText(config: EffectiveConfig, map: ServiceTierMapFile, model: Mod
   const key = modelKey(model);
   if (!key) return undefined;
   const entry = config.entries[key];
-  if (!entry?.active) return colorStatus(`${STATUS_OFF_ICON} off`);
+  if (!entry?.active) return colorStatus(`${STATUS_LABEL} ${STATUS_OFF_ICON} off`);
   const support = mapSupportState(map, key, entry.serviceTier);
   const supported = support === "supported";
   const prefix = entry.serviceTier === "priority" ? STATUS_ICON : STATUS_ACTIVE_ICON;
-  const text = `${prefix} ${entry.serviceTier}${supported ? "" : ` ${support}`}`;
+  const text = `${STATUS_LABEL} ${prefix} ${entry.serviceTier}${supported ? "" : ` ${support}`}`;
   return colorStatus(text, supported ? "green" : undefined);
 }
 
@@ -554,18 +582,25 @@ function updateStatus(ctx: ExtensionContext): void {
   ctx.ui.setStatus(STATUS_KEY, statusText(config, map, ctx.model) ?? undefined);
 }
 
-function startProbeStatus(ctx: ExtensionContext, tier: ServiceTier): () => void {
+function startProbeStatus(ctx: ExtensionContext): { update: (tier: ServiceTier, index: number, total: number) => void; stop: () => void } {
   let index = 0;
+  let label = "probing";
   const render = () => {
     const frame = PROBE_STATUS_FRAMES[index % PROBE_STATUS_FRAMES.length];
-    ctx.ui.setStatus(STATUS_KEY, colorStatus(`${frame} probing ${tier}`));
+    ctx.ui.setStatus(STATUS_KEY, colorStatus(`${STATUS_LABEL} ${frame} ${label}`));
     index += 1;
   };
   render();
   const timer = setInterval(render, PROBE_STATUS_INTERVAL_MS);
-  return () => {
-    clearInterval(timer);
-    updateStatus(ctx);
+  return {
+    update: (tier, tierIndex, total) => {
+      label = `probing ${tier} ${tierIndex}/${total}`;
+      render();
+    },
+    stop: () => {
+      clearInterval(timer);
+      updateStatus(ctx);
+    },
   };
 }
 
@@ -635,29 +670,54 @@ async function runAggressiveProbeForCurrentTier(ctx: ExtensionCommandContext, ke
     return "unknown";
   }
   const paths = getPaths(ctx);
-  ctx.ui.notify(`service_tier=${tier} aggressive probe started for ${key}; waiting for provider result...`, "warning");
-  const stopProbeStatus = startProbeStatus(ctx, tier);
-  let result: ProbeTierResult;
+  ctx.ui.notify(`service_tier aggressive probe started for ${key}; checking ${SERVICE_TIERS.length} tier(s)...`, "warning");
+  const probeStatus = startProbeStatus(ctx);
+  const results: Partial<Record<ServiceTier, ProbeTierResult>> = {};
   try {
-    result = await probeTier(ctx.model, tier, ctx);
+    for (const [index, currentTier] of SERVICE_TIERS.entries()) {
+      probeStatus.update(currentTier, index + 1, SERVICE_TIERS.length);
+      results[currentTier] = await probeTier(ctx.model, currentTier, ctx);
+    }
   } finally {
-    stopProbeStatus();
+    probeStatus.stop();
   }
+  const unknownTiers = SERVICE_TIERS.filter((currentTier) => results[currentTier] === "unknown");
+  if (unknownTiers.length > 0) {
+    ctx.ui.notify(
+      `service_tier aggressive probe for ${key} did not determine ${unknownTiers.join(", ")}; ${MAP_BASENAME} was not changed.`,
+      "warning",
+    );
+    return results[tier] ?? "unknown";
+  }
+  const determinedResults = Object.fromEntries(
+    SERVICE_TIERS.map((currentTier) => [currentTier, results[currentTier] as Exclude<ProbeTierResult, "unknown">]),
+  ) as Record<ServiceTier, Exclude<ProbeTierResult, "unknown">>;
+  const supportedTiers = SERVICE_TIERS.filter((currentTier) => determinedResults[currentTier] === "supported");
+  const unsupportedTiers = SERVICE_TIERS.filter((currentTier) => determinedResults[currentTier] === "unsupported");
   const map = ensureMap(paths.map);
-  if (result === "supported") {
-    writeMap(paths.map, markTierSupported(map, key, tier, ctx.model));
-    updateStatus(ctx);
-    ctx.ui.notify(`service_tier=${tier} is supported for ${key}; updated ${MAP_BASENAME}.`, "info");
-    return result;
+  writeMap(
+    paths.map,
+    markTierProbeResults(
+      map,
+      key,
+      determinedResults,
+      ctx.model,
+      unsupportedTiers.length > 0 ? `service_tier aggressive probe rejected: ${unsupportedTiers.join(", ")}` : undefined,
+    ),
+  );
+  updateStatus(ctx);
+  if (determinedResults[tier] === "supported") {
+    ctx.ui.notify(
+      `service_tier aggressive probe completed for ${key}; supported: ${supportedTiers.join(", ") || "none"}. Updated ${MAP_BASENAME}.`,
+      "info",
+    );
+  } else {
+    ctx.ui.notify(
+      `service_tier aggressive probe completed for ${key}; ${tier} remains unknown. Updated ${MAP_BASENAME}.`,
+      "warning",
+    );
   }
-  if (result === "unsupported") {
-    writeMap(paths.map, markTierUnsupported(map, key, tier, "service_tier aggressive probe was not accepted"));
-    updateStatus(ctx);
-    ctx.ui.notify(`service_tier=${tier} support remains unknown for ${key}; updated ${MAP_BASENAME}.`, "warning");
-    return result;
-  }
-  ctx.ui.notify(`service_tier=${tier} aggressive probe for ${key} did not determine support; ${MAP_BASENAME} was not changed.`, "warning");
-  return result;
+  return determinedResults[tier];
 }
 
 const AGGRESSIVE_ONCE_CHOICE = "Use aggressive mode once";
@@ -668,12 +728,12 @@ const UNSUPPORTED_PROMPT_CHOICES = [AGGRESSIVE_ONCE_CHOICE, AGGRESSIVE_ALWAYS_CH
 
 async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<void> {
   const { config, map } = loadState(ctx);
-  if (mapSupportState(map, key, tier) !== "unknown") return;
   if (config.unknownModelBehavior === "aggressive") {
-    ctx.ui.notify(`service_tier=${tier} support is unknown for ${key}; aggressive behavior will probe it now.`, "warning");
+    ctx.ui.notify(`service_tier=${tier} aggressive behavior will probe all service tiers for ${key} now.`, "warning");
     await runAggressiveProbeForCurrentTier(ctx, key, tier);
     return;
   }
+  if (mapSupportState(map, key, tier) !== "unknown") return;
   if (config.unknownModelBehavior === "unknown") {
     ctx.ui.notify(`service_tier=${tier} support is unknown for ${key}; it will not be injected.`, "info");
     return;

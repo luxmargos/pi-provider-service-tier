@@ -224,7 +224,7 @@ Refresh commands are preset-only and do not call providers. Unset commands do no
 
 `aggressive` injects the configured tier even when support is unknown. `unknown` leaves unknown tiers uninjected. The command writes user-global config.
 
-`Use aggressive mode once` and `Use aggressive mode and do not ask again` immediately run a low-token current-model probe and show progress notifications while the extension waits for the provider result. A successful probe marks the tier supported; a `service_tier` provider error keeps support unknown. The failed probe is not retried.
+`Use aggressive mode once` and `Use aggressive mode and do not ask again` immediately run low-token current-model probes for every known service tier and show progress notifications while the extension waits for provider results. A completed probe cycle writes one `source: "probe"` map entry with complete `tiers` and `unsupportedTiers`. If any tier cannot be determined, the support map is not overwritten with partial probe results. Failed probes are not retried.
 
 ### Debug injection decisions
 
@@ -309,6 +309,8 @@ Example:
   }
 }
 ```
+
+`source` is `preset` for bundled preset refreshes, `probe` for aggressive probe results, `error` for provider errors observed during normal requests, and `manual` for manual map edits.
 
 Preset support currently includes:
 

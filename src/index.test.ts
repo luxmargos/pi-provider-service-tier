@@ -16,6 +16,7 @@ import {
   isUnknownModelBehavior,
   mapSupportsTier,
   mapSupportState,
+  markTierProbeResults,
   markTierUnsupported,
   markTierSupported,
   mergeConfigs,
@@ -357,14 +358,14 @@ test("status text omits provider/model key", () => {
     const paths = configPaths("/repo", "/home/user");
     const config = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } }, undefined, paths);
     const map = { entries: { "openai/gpt-5.5": buildPresetMapEntry(openAIModel) } };
-    assert.equal(_test.statusText(config, map, openAIModel), "⚡ priority");
-    assert.equal(_test.statusText(config, { entries: {} }, openAIModel), "⚡ priority unknown");
+    assert.equal(_test.statusText(config, map, openAIModel), "service_tier ⚡ priority");
+    assert.equal(_test.statusText(config, { entries: {} }, openAIModel), "service_tier ⚡ priority unknown");
     const flexConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "flex" } } }, undefined, paths);
-    assert.equal(_test.statusText(flexConfig, map, openAIModel), "● flex");
+    assert.equal(_test.statusText(flexConfig, map, openAIModel), "service_tier ● flex");
     const offConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: false, serviceTier: "priority" } } }, undefined, paths);
-    assert.equal(_test.statusText(offConfig, map, openAIModel), "○ off");
+    assert.equal(_test.statusText(offConfig, map, openAIModel), "service_tier ○ off");
     const unsetConfig = mergeConfigs(undefined, undefined, paths);
-    assert.equal(_test.statusText(unsetConfig, map, openAIModel), "○ off");
+    assert.equal(_test.statusText(unsetConfig, map, openAIModel), "service_tier ○ off");
   } finally {
     if (previousNoColor === undefined) delete process.env.NO_COLOR;
     else process.env.NO_COLOR = previousNoColor;
@@ -377,9 +378,9 @@ test("status text does not yellow-highlight off or unknown states", () => {
   try {
     const paths = configPaths("/repo", "/home/user");
     const offConfig = mergeConfigs(undefined, undefined, paths);
-    assert.equal(_test.statusText(offConfig, { entries: {} }, openAIModel), "○ off");
+    assert.equal(_test.statusText(offConfig, { entries: {} }, openAIModel), "service_tier ○ off");
     const unknownConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } }, undefined, paths);
-    assert.equal(_test.statusText(unknownConfig, { entries: {} }, openAIModel), "⚡ priority unknown");
+    assert.equal(_test.statusText(unknownConfig, { entries: {} }, openAIModel), "service_tier ⚡ priority unknown");
   } finally {
     if (previousNoColor === undefined) delete process.env.NO_COLOR;
     else process.env.NO_COLOR = previousNoColor;
@@ -410,6 +411,25 @@ test("marks aggressive-once success as supported", () => {
   assert.equal(next.entries?.["openai/gpt-5.5"].supported, true);
   assert.deepEqual(next.entries?.["openai/gpt-5.5"].tiers, ["priority"]);
   assert.equal(next.entries?.["openai/gpt-5.5"].unsupportedTiers?.includes("priority") ?? false, false);
+});
+
+test("marks aggressive probe results with complete probe metadata", () => {
+  const presetMap = { entries: { "openai/gpt-5.5": buildPresetMapEntry(openAIModel) } };
+  const next = markTierProbeResults(
+    presetMap,
+    "openai/gpt-5.5",
+    { priority: "supported", flex: "unsupported", default: "supported", auto: "unsupported", scale: "unsupported" },
+    openAIModel,
+    "probe rejected: flex, auto, scale",
+  );
+  assert.equal(next.entries?.["openai/gpt-5.5"].provider, "openai");
+  assert.equal(next.entries?.["openai/gpt-5.5"].id, "gpt-5.5");
+  assert.equal(next.entries?.["openai/gpt-5.5"].api, "openai-responses");
+  assert.equal(next.entries?.["openai/gpt-5.5"].source, "probe");
+  assert.equal(next.entries?.["openai/gpt-5.5"].error, "probe rejected: flex, auto, scale");
+  assert.equal(next.entries?.["openai/gpt-5.5"].supported, true);
+  assert.deepEqual(next.entries?.["openai/gpt-5.5"].tiers, ["priority", "default"]);
+  assert.deepEqual(next.entries?.["openai/gpt-5.5"].unsupportedTiers, ["flex", "auto", "scale"]);
 });
 
 test("unknown behavior defaults to ask", () => {
@@ -572,12 +592,24 @@ test("ask flow runs aggressive-once probe immediately and persists success", asy
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home, codexModel);
-  const restoreProbe = _test.setProbeTierForTest(async () => "supported");
+  const probedTiers: string[] = [];
+  const restoreProbe = _test.setProbeTierForTest(async (_model, tier) => {
+    probedTiers.push(tier);
+    return "supported";
+  });
   try {
     const paths = configPaths(cwd, home);
     harness.selections.push("Use aggressive mode once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
-    assert.equal(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"].tiers.includes("flex"), true);
+    const entry = readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"];
+    assert.deepEqual(probedTiers, [...SERVICE_TIERS]);
+    assert.equal(entry?.provider, "openai-codex");
+    assert.equal(entry?.id, "gpt-5.5");
+    assert.equal(entry?.api, "openai-codex-responses");
+    assert.equal(entry?.source, "probe");
+    assert.equal(entry?.supported, true);
+    assert.deepEqual(entry?.tiers, [...SERVICE_TIERS]);
+    assert.equal(entry?.unsupportedTiers, undefined);
     assert.equal(
       harness.notifications.some(({ message }) => message.includes("aggressive probe started")),
       true,
@@ -601,10 +633,60 @@ test("aggressive probe shows and clears probing status", async () => {
     harness.selections.push("Use aggressive mode once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
     assert.equal(
-      harness.statuses.some(({ value }) => value?.includes("probing flex")),
+      harness.statuses.some(({ value }) => value?.includes("service_tier") && value.includes("probing flex")),
       true,
     );
     assert.equal(harness.statuses.at(-1)?.value?.includes("probing flex"), false);
+  } finally {
+    restoreProbe();
+    harness.restore();
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("aggressive behavior probes all tiers even when selected tier is preset-supported", async () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  const harness = createExtensionHarness(cwd, home, codexModel);
+  const probedTiers: string[] = [];
+  const restoreProbe = _test.setProbeTierForTest(async (_model, tier) => {
+    probedTiers.push(tier);
+    return tier === "priority" || tier === "default" ? "supported" : "unsupported";
+  });
+  try {
+    const paths = configPaths(cwd, home);
+    await harness.commands.get("service-tier-unknown-behavior")?.handler("aggressive", harness.ctx);
+    await harness.commands.get("service-tier-project")?.handler("priority", harness.ctx);
+    const entry = readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"];
+    assert.deepEqual(probedTiers, [...SERVICE_TIERS]);
+    assert.equal(entry?.source, "probe");
+    assert.deepEqual(entry?.tiers, ["priority", "default"]);
+    assert.deepEqual(entry?.unsupportedTiers, ["flex", "auto", "scale"]);
+  } finally {
+    restoreProbe();
+    harness.restore();
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("aggressive probe leaves map unchanged when any tier is unknown", async () => {
+  const cwd = tempDir();
+  const home = tempDir();
+  const harness = createExtensionHarness(cwd, home, codexModel);
+  const restoreProbe = _test.setProbeTierForTest(async (_model, tier) => (tier === "auto" ? "unknown" : "supported"));
+  try {
+    const paths = configPaths(cwd, home);
+    harness.selections.push("Use aggressive mode once");
+    await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
+    const entry = readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"];
+    assert.equal(entry?.source, "preset");
+    assert.deepEqual(entry?.tiers, ["priority", "default"]);
+    assert.equal(
+      harness.notifications.some(({ message }) => message.includes("did not determine auto")),
+      true,
+    );
   } finally {
     restoreProbe();
     harness.restore();
@@ -617,13 +699,26 @@ test("ask flow aggressive always probes immediately and keeps aggressive behavio
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home, codexModel);
-  const restoreProbe = _test.setProbeTierForTest(async () => "unsupported");
+  const probedTiers: string[] = [];
+  const restoreProbe = _test.setProbeTierForTest(async (_model, tier) => {
+    probedTiers.push(tier);
+    return "unsupported";
+  });
   try {
     const paths = configPaths(cwd, home);
     harness.selections.push("Use aggressive mode and do not ask again");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
     assert.equal(readConfig(paths.user)?.unknownModelBehavior, "aggressive");
-    assert.equal(readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"].unsupportedTiers?.includes("flex"), true);
+    const entry = readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"];
+    assert.deepEqual(probedTiers, [...SERVICE_TIERS]);
+    assert.equal(entry?.provider, "openai-codex");
+    assert.equal(entry?.id, "gpt-5.5");
+    assert.equal(entry?.api, "openai-codex-responses");
+    assert.equal(entry?.source, "probe");
+    assert.equal(entry?.supported, false);
+    assert.deepEqual(entry?.tiers, []);
+    assert.deepEqual(entry?.unsupportedTiers, [...SERVICE_TIERS]);
+    assert.equal(entry?.error, "service_tier aggressive probe rejected: priority, flex, default, auto, scale");
     assert.equal(
       harness.notifications.some(({ message }) => message.includes("aggressive probe started")),
       true,
