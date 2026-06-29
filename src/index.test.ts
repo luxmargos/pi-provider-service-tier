@@ -198,7 +198,7 @@ test("ignores malformed JSON and invalid entries", () => {
 test("merges user and project config by provider/model key", () => {
   const paths = configPaths("/repo", "/home/user");
   const userConfig: ConfigFile = {
-    unknownModelBehavior: "aggressive",
+    unknownModelBehavior: "auto-probe",
     entries: {
       "openai/gpt-5.5": { active: true, serviceTier: "flex" },
       "openai/gpt-4.1": { active: true, serviceTier: "priority" },
@@ -210,7 +210,7 @@ test("merges user and project config by provider/model key", () => {
     },
   };
   const effective = mergeConfigs(userConfig, projectConfig, paths);
-  assert.equal(effective.unknownModelBehavior, "aggressive");
+  assert.equal(effective.unknownModelBehavior, "auto-probe");
   assert.deepEqual(effective.entries["openai/gpt-5.5"], { active: false, serviceTier: "flex" });
   assert.deepEqual(effective.entries["openai/gpt-4.1"], { active: true, serviceTier: "priority" });
 });
@@ -218,9 +218,9 @@ test("merges user and project config by provider/model key", () => {
 test("project unknown behavior overrides user unknown behavior", () => {
   const paths = configPaths("/repo", "/home/user");
   assert.equal(
-    mergeConfigs({ unknownModelBehavior: "aggressive" }, { unknownModelBehavior: "unknown" }, paths)
+    mergeConfigs({ unknownModelBehavior: "auto-probe" }, { unknownModelBehavior: "leave-unknown" }, paths)
       .unknownModelBehavior,
-    "unknown",
+    "leave-unknown",
   );
 });
 
@@ -243,9 +243,9 @@ test("setScopedUnknownModelBehavior writes unknown behavior without dropping ent
   try {
     const paths = configPaths(cwd, home);
     setScopedEntry(paths, "project", "openai/gpt-5.5", { active: true, serviceTier: "priority" });
-    setScopedUnknownModelBehavior(paths, "project", "aggressive");
+    setScopedUnknownModelBehavior(paths, "project", "auto-probe");
     const config = readConfig(paths.project);
-    assert.equal(config?.unknownModelBehavior, "aggressive");
+    assert.equal(config?.unknownModelBehavior, "auto-probe");
     assert.deepEqual(config?.entries?.["openai/gpt-5.5"], { active: true, serviceTier: "priority" });
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -442,7 +442,7 @@ test("detects unsupported service_tier errors and updates map without retry stat
   assert.equal(mapSupportState({ entries: {} }, "openai/gpt-5.5", "priority"), "unknown");
 });
 
-test("marks aggressive-once success as supported", () => {
+test("marks auto-probe once success as supported", () => {
   const map = { entries: { "openai/gpt-5.5": markTierUnsupported({ entries: {} }, "openai/gpt-5.5", "priority").entries?.["openai/gpt-5.5"]! } };
   const next = markTierSupported(map, "openai/gpt-5.5", "priority", openAIModel);
   assert.equal(next.entries?.["openai/gpt-5.5"].determined, false);
@@ -450,7 +450,7 @@ test("marks aggressive-once success as supported", () => {
   assert.equal(next.entries?.["openai/gpt-5.5"].unsupportedTiers?.includes("priority") ?? false, false);
 });
 
-test("marks aggressive probe results with complete probe metadata", () => {
+test("marks auto-probe results with complete probe metadata", () => {
   const presetMap = { entries: { "openai/gpt-5.5": buildPresetMapEntry(openAIModel) } };
   const next = markTierProbeResults(
     presetMap,
@@ -478,8 +478,9 @@ test("unknown behavior command exports completions", () => {
   assert.equal(_test.COMMAND_UNKNOWN_BEHAVIOR, "service-tier-unknown-behavior");
   assert.deepEqual(_test.unknownBehaviorCompletions("a"), [
     { value: "ask", label: "ask" },
-    { value: "aggressive", label: "aggressive" },
+    { value: "auto-probe", label: "auto-probe" },
   ]);
+  assert.deepEqual(_test.unknownBehaviorCompletions("l"), [{ value: "leave-unknown", label: "leave-unknown" }]);
 });
 
 test("can persist map entries", () => {
@@ -686,13 +687,13 @@ test("probe-known unsupported tiers do not ask again", async () => {
     const paths = configPaths(cwd, home);
     const key = "opencode-go/minimax-m2.5";
     writeMap(paths.map, markTierProbeResults({ entries: {} }, key, { priority: "supported", flex: "unsupported", default: "supported", auto: "unsupported", scale: "unsupported" }, opencodeMinimaxModel));
-    harness.selections.push("Use aggressive mode once");
+    harness.selections.push("Auto-probe once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
     const entry = readMap(paths.map)?.entries?.[key];
     assert.equal(entry?.source, "probe");
     assert.deepEqual(entry?.tiers, ["priority", "default"]);
     assert.deepEqual(entry?.unsupportedTiers, ["flex", "auto", "scale"]);
-    assert.deepEqual(harness.selections, ["Use aggressive mode once"]);
+    assert.deepEqual(harness.selections, ["Auto-probe once"]);
     assert.equal(
       harness.notifications.some(({ message }) => message.includes("is not supported")),
       true,
@@ -719,11 +720,11 @@ test("leave unknown choices write user-mark entries for undetermined presets", a
     assert.deepEqual(entry?.tiers, []);
     assert.deepEqual(entry?.unsupportedTiers, ["scale"]);
 
-    harness.selections.push("Use aggressive mode once");
+    harness.selections.push("Auto-probe once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
     entry = readMap(paths.map)?.entries?.[key];
     assert.equal(entry?.source, "user-mark");
-    assert.deepEqual(harness.selections, ["Use aggressive mode once"]);
+    assert.deepEqual(harness.selections, ["Auto-probe once"]);
   } finally {
     harness.restore();
     rmSync(cwd, { recursive: true, force: true });
@@ -738,13 +739,13 @@ test("leave unknown and do not ask again writes user-mark and unknown behavior",
   try {
     const paths = configPaths(cwd, home);
     const key = "opencode-go/minimax-m2.5";
-    harness.selections.push("Leave unknown and do not ask again");
+    harness.selections.push("Always leave unknown");
     await harness.commands.get("service-tier-project")?.handler("scale", harness.ctx);
     const entry = readMap(paths.map)?.entries?.[key];
     assert.equal(entry?.source, "user-mark");
     assert.equal(entry?.determined, false);
     assert.deepEqual(entry?.unsupportedTiers, ["scale"]);
-    assert.equal(readConfig(paths.user)?.unknownModelBehavior, "unknown");
+    assert.equal(readConfig(paths.user)?.unknownModelBehavior, "leave-unknown");
   } finally {
     harness.restore();
     rmSync(cwd, { recursive: true, force: true });
@@ -779,8 +780,8 @@ test("unknown behavior command persists to user config", async () => {
   const harness = createExtensionHarness(cwd, home);
   try {
     const paths = configPaths(cwd, home);
-    await harness.commands.get("service-tier-unknown-behavior")?.handler("aggressive", harness.ctx);
-    assert.equal(readConfig(paths.user)?.unknownModelBehavior, "aggressive");
+    await harness.commands.get("service-tier-unknown-behavior")?.handler("auto-probe", harness.ctx);
+    assert.equal(readConfig(paths.user)?.unknownModelBehavior, "auto-probe");
     assert.equal(readConfig(paths.project), undefined);
   } finally {
     harness.restore();
@@ -789,7 +790,7 @@ test("unknown behavior command persists to user config", async () => {
   }
 });
 
-test("ask flow runs aggressive-once probe immediately and persists success", async () => {
+test("ask flow runs auto-probe once probe immediately and persists success", async () => {
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
@@ -800,13 +801,13 @@ test("ask flow runs aggressive-once probe immediately and persists success", asy
   });
   try {
     const paths = configPaths(cwd, home);
-    harness.selections.push("Use aggressive mode once");
+    harness.selections.push("Auto-probe once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
     assert.equal(harness.prompts.length, 1);
-    assert.match(harness.prompts[0], /\n\nAggressive mode sends low-token probe requests/);
+    assert.match(harness.prompts[0], /\n\nAuto-probe sends low-token probe requests/);
     assert.match(harness.prompts[0], /low-token probe requests/);
     assert.match(harness.prompts[0], /may consume provider tokens/);
-    await _test.waitForAggressiveProbesForTest();
+    await _test.waitForAutoProbesForTest();
     const entry = readMap(paths.map)?.entries?.["opencode-go/minimax-m2.5"];
     assert.deepEqual(probedTiers, [...SERVICE_TIERS]);
     assert.equal(entry?.provider, "opencode-go");
@@ -817,7 +818,7 @@ test("ask flow runs aggressive-once probe immediately and persists success", asy
     assert.deepEqual(entry?.tiers, [...SERVICE_TIERS]);
     assert.equal(entry?.unsupportedTiers, undefined);
     assert.equal(
-      harness.notifications.some(({ message }) => message.includes("aggressive probe started")),
+      harness.notifications.some(({ message }) => message.includes("auto-probe started")),
       true,
     );
     const secondPayload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "minimax-m2.5" } } as never, harness.ctx);
@@ -830,7 +831,7 @@ test("ask flow runs aggressive-once probe immediately and persists success", asy
   }
 });
 
-test("aggressive probe does not block configured request injection", async () => {
+test("auto-probe does not block configured request injection", async () => {
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
@@ -843,7 +844,7 @@ test("aggressive probe does not block configured request injection", async () =>
   });
   try {
     const paths = configPaths(cwd, home);
-    harness.selections.push("Use aggressive mode once");
+    harness.selections.push("Auto-probe once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
     assert.deepEqual(probedTiers, ["priority"]);
     assert.equal(readMap(paths.map)?.entries?.["opencode-go/minimax-m2.5"]?.source, "preset");
@@ -852,13 +853,13 @@ test("aggressive probe does not block configured request injection", async () =>
     assert.deepEqual(payload, { model: "minimax-m2.5", service_tier: "flex" });
 
     firstProbe.resolve("supported");
-    await _test.waitForAggressiveProbesForTest();
+    await _test.waitForAutoProbesForTest();
     const entry = readMap(paths.map)?.entries?.["opencode-go/minimax-m2.5"];
     assert.equal(entry?.source, "probe");
     assert.deepEqual(entry?.tiers, [...SERVICE_TIERS]);
   } finally {
     firstProbe.resolve("supported");
-    await _test.waitForAggressiveProbesForTest();
+    await _test.waitForAutoProbesForTest();
     restoreProbe();
     harness.restore();
     rmSync(cwd, { recursive: true, force: true });
@@ -866,15 +867,15 @@ test("aggressive probe does not block configured request injection", async () =>
   }
 });
 
-test("aggressive probe shows and clears probing status", async () => {
+test("auto-probe shows and clears probing status", async () => {
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
   const restoreProbe = _test.setProbeTierForTest(async () => "supported");
   try {
-    harness.selections.push("Use aggressive mode once");
+    harness.selections.push("Auto-probe once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
-    await _test.waitForAggressiveProbesForTest();
+    await _test.waitForAutoProbesForTest();
     assert.equal(
       harness.statuses.some(({ value }) => value?.includes("service_tier") && value.includes("probing flex")),
       true,
@@ -888,7 +889,7 @@ test("aggressive probe shows and clears probing status", async () => {
   }
 });
 
-test("aggressive behavior probes all tiers even when selected tier is preset-supported", async () => {
+test("auto-probe behavior probes all tiers even when selected tier is preset-supported", async () => {
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home, codexModel);
@@ -899,9 +900,9 @@ test("aggressive behavior probes all tiers even when selected tier is preset-sup
   });
   try {
     const paths = configPaths(cwd, home);
-    await harness.commands.get("service-tier-unknown-behavior")?.handler("aggressive", harness.ctx);
+    await harness.commands.get("service-tier-unknown-behavior")?.handler("auto-probe", harness.ctx);
     await harness.commands.get("service-tier-project")?.handler("priority", harness.ctx);
-    await _test.waitForAggressiveProbesForTest();
+    await _test.waitForAutoProbesForTest();
     const entry = readMap(paths.map)?.entries?.["openai-codex/gpt-5.5"];
     assert.deepEqual(probedTiers, [...SERVICE_TIERS]);
     assert.equal(entry?.source, "probe");
@@ -915,16 +916,16 @@ test("aggressive behavior probes all tiers even when selected tier is preset-sup
   }
 });
 
-test("aggressive probe leaves map unchanged when any tier is unknown", async () => {
+test("auto-probe leaves map unchanged when any tier is unknown", async () => {
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
   const restoreProbe = _test.setProbeTierForTest(async (_model, tier) => (tier === "auto" ? "unknown" : "supported"));
   try {
     const paths = configPaths(cwd, home);
-    harness.selections.push("Use aggressive mode once");
+    harness.selections.push("Auto-probe once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
-    await _test.waitForAggressiveProbesForTest();
+    await _test.waitForAutoProbesForTest();
     const entry = readMap(paths.map)?.entries?.["opencode-go/minimax-m2.5"];
     assert.equal(entry?.source, "preset");
     assert.equal(entry?.determined, false);
@@ -941,7 +942,7 @@ test("aggressive probe leaves map unchanged when any tier is unknown", async () 
   }
 });
 
-test("ask flow aggressive always probes immediately and keeps aggressive behavior", async () => {
+test("ask flow always auto-probe probes immediately and keeps auto-probe behavior", async () => {
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home, opencodeMinimaxModel);
@@ -952,10 +953,10 @@ test("ask flow aggressive always probes immediately and keeps aggressive behavio
   });
   try {
     const paths = configPaths(cwd, home);
-    harness.selections.push("Use aggressive mode and do not ask again");
+    harness.selections.push("Always auto-probe");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
-    await _test.waitForAggressiveProbesForTest();
-    assert.equal(readConfig(paths.user)?.unknownModelBehavior, "aggressive");
+    await _test.waitForAutoProbesForTest();
+    assert.equal(readConfig(paths.user)?.unknownModelBehavior, "auto-probe");
     const entry = readMap(paths.map)?.entries?.["opencode-go/minimax-m2.5"];
     assert.deepEqual(probedTiers, [...SERVICE_TIERS]);
     assert.equal(entry?.provider, "opencode-go");
@@ -965,9 +966,9 @@ test("ask flow aggressive always probes immediately and keeps aggressive behavio
     assert.equal(entry?.determined, true);
     assert.deepEqual(entry?.tiers, []);
     assert.deepEqual(entry?.unsupportedTiers, [...SERVICE_TIERS]);
-    assert.equal(entry?.error, "service_tier aggressive probe rejected: priority, flex, default, auto, scale");
+    assert.equal(entry?.error, "service_tier auto-probe rejected: priority, flex, default, auto, scale");
     assert.equal(
-      harness.notifications.some(({ message }) => message.includes("aggressive probe started")),
+      harness.notifications.some(({ message }) => message.includes("auto-probe started")),
       true,
     );
     const payload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "gpt-5.5" } } as never, harness.ctx);
@@ -1015,7 +1016,7 @@ test("configured request-time injection does not persist support on success", as
     await harness.handlers.get("message_end")?.({ message: { role: "assistant" } } as never, harness.ctx);
     assert.equal(readMap(paths.map)?.entries?.["openai/gpt-5.5"], undefined);
     assert.equal(
-      harness.notifications.some(({ message }) => message.includes("aggressive injection started")),
+      harness.notifications.some(({ message }) => message.includes("auto-probe injection started")),
       false,
     );
   } finally {

@@ -226,25 +226,25 @@ Tier and fast commands preserve `source: "probe"` map entries when the requested
 
 ```text
 /service-tier-unknown-behavior ask
-/service-tier-unknown-behavior aggressive
-/service-tier-unknown-behavior unknown
+/service-tier-unknown-behavior auto-probe
+/service-tier-unknown-behavior leave-unknown
 /service-tier-unknown-behavior status
 ```
 
 `ask` is the default. When an explicit tier, fast, or refresh command selects a tier whose stored support is unknown, Pi prompts with:
 
-- `Use aggressive mode once`
-- `Use aggressive mode and do not ask again`
+- `Auto-probe once`
+- `Always auto-probe`
 - `Leave unknown once`
-- `Leave unknown and do not ask again`
+- `Always leave unknown`
 
-`aggressive` probes unknown support immediately after explicit tier/fast/refresh commands. `unknown` leaves unknown support unresolved without prompting. The command writes user-global config. Request-time injection still follows the active configured tier.
+`auto-probe` probes unknown support immediately after explicit tier/fast/refresh commands. `leave-unknown` leaves unknown support unresolved without prompting. The command writes user-global config. Request-time injection still follows the active configured tier.
 
 In `ask` mode, the prompt is shown only when the map entry has `"determined": false` and `source` is not `"user-mark"`.
 
-The `ask` prompt shows a separate warning line that aggressive mode sends low-token probe requests for every known service tier and may consume provider tokens.
+The `ask` prompt shows a separate warning line that auto-probe sends low-token probe requests for every known service tier and may consume provider tokens.
 
-`Use aggressive mode once` and `Use aggressive mode and do not ask again` start low-token current-model probes for every known service tier in the background and show progress notifications while provider results arrive. Requests sent while probing is in progress are not queued by this extension; they use the current active configuration and current stored support state. A completed probe cycle writes one `source: "probe"` map entry with complete `tiers` and `unsupportedTiers`. If any tier cannot be determined, the support map is not overwritten with partial probe results. Failed probes are not retried.
+`Auto-probe once` and `Always auto-probe` start low-token current-model probes for every known service tier in the background and show progress notifications while provider results arrive. Requests sent while probing is in progress are not queued by this extension; they use the current active configuration and current stored support state. A completed probe cycle writes one `source: "probe"` map entry with complete `tiers` and `unsupportedTiers`. If any tier cannot be determined, the support map is not overwritten with partial probe results. Failed probes are not retried.
 
 ### Debug injection decisions
 
@@ -307,7 +307,7 @@ Example:
 }
 ```
 
-`unknownModelBehavior` is optional and defaults to `ask`. Valid values are `ask`, `aggressive`, and `unknown`. Use `/service-tier-unknown-behavior [ask|aggressive|unknown|status]` to manage the user-global setting, or set it manually in either config file. Project config overrides user config for this field.
+`unknownModelBehavior` is optional and defaults to `ask`. Valid values are `ask`, `auto-probe`, and `leave-unknown`. Use `/service-tier-unknown-behavior [ask|auto-probe|leave-unknown|status]` to manage the user-global setting, or set it manually in either config file. Project config overrides user config for this field.
 
 On extension startup, existing config and support-map files are migrated one schema version at a time before the extension refreshes stored non-probe entries from bundled presets. Read paths tolerate older files, but the persisted migration rewrite happens during startup.
 
@@ -332,7 +332,7 @@ Example:
 }
 ```
 
-`determined` means the entry has a complete stored support decision from presets or a completed aggressive probe. `source` is `preset` for bundled preset refreshes, `probe` for aggressive probe results, `error` for provider errors observed during normal requests, `user-mark` for user choices to leave support unknown, and `manual` for manual map edits.
+`determined` means the entry has a complete stored support decision from presets or a completed auto-probe. `source` is `preset` for bundled preset refreshes, `probe` for auto-probe results, `error` for provider errors observed during normal requests, `user-mark` for user choices to leave support unknown, and `manual` for manual map edits.
 
 Preset support currently includes:
 
@@ -344,7 +344,7 @@ Preset support currently includes:
 | `openai-codex` + `openai-codex-responses` | fallback for other models | `priority` |
 | `opencode-go` + `openai-completions` | probed models in `presets/opencode-go.json` | model-specific; usually `priority`, `flex`, `default`, `auto`, `scale` |
 
-Other providers/models remain unknown unless refreshed from presets or updated by a completed aggressive probe result. Unsupported provider errors are recorded in the map for troubleshooting and future status, but they do not disable an active configured tier by themselves.
+Other providers/models remain unknown unless refreshed from presets or updated by a completed auto-probe result. Unsupported provider errors are recorded in the map for troubleshooting and future status, but they do not disable an active configured tier by themselves.
 
 ## Unsupported tier errors
 

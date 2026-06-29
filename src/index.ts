@@ -43,7 +43,7 @@ const COMMAND_DEBUG = "service-tier-debug";
 
 export const SERVICE_TIERS = ["priority", "flex", "default", "auto", "scale"] as const;
 export type ServiceTier = (typeof SERVICE_TIERS)[number];
-export const UNKNOWN_MODEL_BEHAVIORS = ["ask", "aggressive", "unknown"] as const;
+export const UNKNOWN_MODEL_BEHAVIORS = ["ask", "auto-probe", "leave-unknown"] as const;
 export type UnknownModelBehavior = (typeof UNKNOWN_MODEL_BEHAVIORS)[number];
 
 export type ConfigScope = "project" | "user";
@@ -295,11 +295,7 @@ function migrateConfigV1ToV2(value: unknown): ConfigFile {
   if (!isRecord(value)) return { ...DEFAULT_CONFIG };
   const config: ConfigFile = { version: 2 };
   const rawUnknownBehavior = value.unknownModelBehavior ?? value.unsupportedModelBehavior;
-  if (isUnknownModelBehavior(rawUnknownBehavior)) {
-    config.unknownModelBehavior = rawUnknownBehavior;
-  } else if (rawUnknownBehavior === "unsupported") {
-    config.unknownModelBehavior = "unknown";
-  }
+  if (isUnknownModelBehavior(rawUnknownBehavior)) config.unknownModelBehavior = rawUnknownBehavior;
   const entries = normalizeEntries(value.entries);
   if (entries !== undefined) config.entries = entries;
   return config;
@@ -783,7 +779,7 @@ async function defaultProbeTier(model: Model<Api>, tier: ServiceTier, ctx: Exten
 }
 
 let probeTier: ProbeTierFunction = defaultProbeTier;
-const activeAggressiveProbes = new Set<Promise<ProbeTierResult>>();
+const activeAutoProbes = new Set<Promise<ProbeTierResult>>();
 
 function setProbeTierForTest(next: ProbeTierFunction): () => void {
   const previous = probeTier;
@@ -793,19 +789,19 @@ function setProbeTierForTest(next: ProbeTierFunction): () => void {
   };
 }
 
-async function waitForAggressiveProbesForTest(): Promise<void> {
-  while (activeAggressiveProbes.size > 0) {
-    await Promise.allSettled([...activeAggressiveProbes]);
+async function waitForAutoProbesForTest(): Promise<void> {
+  while (activeAutoProbes.size > 0) {
+    await Promise.allSettled([...activeAutoProbes]);
   }
 }
 
-async function runAggressiveProbeForCurrentTier(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<ProbeTierResult> {
+async function runAutoProbeForCurrentTier(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<ProbeTierResult> {
   if (!ctx.model) {
     ctx.ui.notify("No current model selected.", "error");
     return "unknown";
   }
   const paths = getPaths(ctx);
-  ctx.ui.notify(`service_tier aggressive probe started for ${key}; checking ${SERVICE_TIERS.length} tier(s)...`, "warning");
+  ctx.ui.notify(`service_tier auto-probe started for ${key}; checking ${SERVICE_TIERS.length} tier(s)...`, "warning");
   const probeStatus = startProbeStatus(ctx);
   const results: Partial<Record<ServiceTier, ProbeTierResult>> = {};
   try {
@@ -819,7 +815,7 @@ async function runAggressiveProbeForCurrentTier(ctx: ExtensionCommandContext, ke
   const unknownTiers = SERVICE_TIERS.filter((currentTier) => results[currentTier] === "unknown");
   if (unknownTiers.length > 0) {
     ctx.ui.notify(
-      `service_tier aggressive probe for ${key} did not determine ${unknownTiers.join(", ")}; ${MAP_BASENAME} was not changed.`,
+      `service_tier auto-probe for ${key} did not determine ${unknownTiers.join(", ")}; ${MAP_BASENAME} was not changed.`,
       "warning",
     );
     return results[tier] ?? "unknown";
@@ -837,49 +833,49 @@ async function runAggressiveProbeForCurrentTier(ctx: ExtensionCommandContext, ke
       key,
       determinedResults,
       ctx.model,
-      unsupportedTiers.length > 0 ? `service_tier aggressive probe rejected: ${unsupportedTiers.join(", ")}` : undefined,
+      unsupportedTiers.length > 0 ? `service_tier auto-probe rejected: ${unsupportedTiers.join(", ")}` : undefined,
     ),
   );
   updateStatus(ctx);
   if (determinedResults[tier] === "supported") {
     ctx.ui.notify(
-      `service_tier aggressive probe completed for ${key}; supported: ${supportedTiers.join(", ") || "none"}. Updated ${MAP_BASENAME}.`,
+      `service_tier auto-probe completed for ${key}; supported: ${supportedTiers.join(", ") || "none"}. Updated ${MAP_BASENAME}.`,
       "info",
     );
   } else {
     ctx.ui.notify(
-      `service_tier aggressive probe completed for ${key}; ${tier} remains unknown. Updated ${MAP_BASENAME}.`,
+      `service_tier auto-probe completed for ${key}; ${tier} remains unknown. Updated ${MAP_BASENAME}.`,
       "warning",
     );
   }
   return determinedResults[tier];
 }
 
-function startAggressiveProbeForCurrentTier(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<ProbeTierResult> {
-  const promise = runAggressiveProbeForCurrentTier(ctx, key, tier).catch((error) => {
+function startAutoProbeForCurrentTier(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<ProbeTierResult> {
+  const promise = runAutoProbeForCurrentTier(ctx, key, tier).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
-    ctx.ui.notify(`service_tier aggressive probe failed for ${key}: ${message}`, "error");
+    ctx.ui.notify(`service_tier auto-probe failed for ${key}: ${message}`, "error");
     updateStatus(ctx);
     return "unknown" as const;
   });
-  activeAggressiveProbes.add(promise);
+  activeAutoProbes.add(promise);
   void promise.finally(() => {
-    activeAggressiveProbes.delete(promise);
+    activeAutoProbes.delete(promise);
   });
   return promise;
 }
 
-const AGGRESSIVE_ONCE_CHOICE = "Use aggressive mode once";
-const AGGRESSIVE_ALWAYS_CHOICE = "Use aggressive mode and do not ask again";
+const AUTO_PROBE_ONCE_CHOICE = "Auto-probe once";
+const AUTO_PROBE_ALWAYS_CHOICE = "Always auto-probe";
 const LEAVE_ONCE_CHOICE = "Leave unknown once";
-const LEAVE_ALWAYS_CHOICE = "Leave unknown and do not ask again";
-const UNSUPPORTED_PROMPT_CHOICES = [AGGRESSIVE_ONCE_CHOICE, AGGRESSIVE_ALWAYS_CHOICE, LEAVE_ONCE_CHOICE, LEAVE_ALWAYS_CHOICE] as const;
+const LEAVE_ALWAYS_CHOICE = "Always leave unknown";
+const UNSUPPORTED_PROMPT_CHOICES = [AUTO_PROBE_ONCE_CHOICE, AUTO_PROBE_ALWAYS_CHOICE, LEAVE_ONCE_CHOICE, LEAVE_ALWAYS_CHOICE] as const;
 
 async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<void> {
   const { config, map } = loadState(ctx);
-  if (config.unknownModelBehavior === "aggressive") {
-    ctx.ui.notify(`service_tier=${tier} aggressive behavior will probe all service tiers for ${key} now.`, "info");
-    startAggressiveProbeForCurrentTier(ctx, key, tier);
+  if (config.unknownModelBehavior === "auto-probe") {
+    ctx.ui.notify(`service_tier=${tier} auto-probe behavior will probe all service tiers for ${key} now.`, "info");
+    startAutoProbeForCurrentTier(ctx, key, tier);
     return;
   }
   const mapEntry = map.entries?.[key];
@@ -893,7 +889,7 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
     return;
   }
   if (mapSupportState(map, key, tier) !== "unknown") return;
-  if (config.unknownModelBehavior === "unknown") {
+  if (config.unknownModelBehavior === "leave-unknown") {
     ctx.ui.notify(`service_tier=${tier} is not recorded in the support map for ${key}; active configuration will still send it.`, "info");
     return;
   }
@@ -902,20 +898,20 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
     [
       `service_tier=${tier} is not recorded in the support map for ${key}.`,
       "",
-      "Aggressive mode sends low-token probe requests for every known service tier and may consume provider tokens.",
+      "Auto-probe sends low-token probe requests for every known service tier and may consume provider tokens.",
     ].join("\n"),
     [...UNSUPPORTED_PROMPT_CHOICES],
   );
   const paths = getPaths(ctx);
-  if (choice === AGGRESSIVE_ONCE_CHOICE) {
-    startAggressiveProbeForCurrentTier(ctx, key, tier);
+  if (choice === AUTO_PROBE_ONCE_CHOICE) {
+    startAutoProbeForCurrentTier(ctx, key, tier);
     return;
   }
-  if (choice === AGGRESSIVE_ALWAYS_CHOICE) {
-    setScopedUnknownModelBehavior(paths, "user", "aggressive");
+  if (choice === AUTO_PROBE_ALWAYS_CHOICE) {
+    setScopedUnknownModelBehavior(paths, "user", "auto-probe");
     updateStatus(ctx);
-    ctx.ui.notify(`user-global unknownModelBehavior set to aggressive; probing service_tier=${tier} for ${key} now.`, "info");
-    startAggressiveProbeForCurrentTier(ctx, key, tier);
+    ctx.ui.notify(`user-global unknownModelBehavior set to auto-probe; probing service_tier=${tier} for ${key} now.`, "info");
+    startAutoProbeForCurrentTier(ctx, key, tier);
     return;
   }
   if (choice === LEAVE_ONCE_CHOICE) {
@@ -930,9 +926,9 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
     if (ctx.model && !buildPresetMapEntry(ctx.model).determined) {
       writeMap(paths.map, markTierUserMarked(ensureMap(paths.map), key, tier, ctx.model));
     }
-    setScopedUnknownModelBehavior(paths, "user", "unknown");
+    setScopedUnknownModelBehavior(paths, "user", "leave-unknown");
     updateStatus(ctx);
-    ctx.ui.notify("user-global unknownModelBehavior set to unknown.", "info");
+    ctx.ui.notify("user-global unknownModelBehavior set to leave-unknown.", "info");
     return;
   }
   ctx.ui.notify("Unsupported service_tier choice cancelled; no behavior changed.", "info");
@@ -1096,7 +1092,7 @@ async function handleUnknownBehaviorCommand(args: string, ctx: ExtensionCommandC
   const arg = args.trim().toLowerCase();
   if (!arg || arg === "status") return notifyUnknownBehaviorStatus(ctx);
   if (!isUnknownModelBehavior(arg)) {
-    ctx.ui.notify("Usage: /service-tier-unknown-behavior [ask|aggressive|unknown|status]", "error");
+    ctx.ui.notify("Usage: /service-tier-unknown-behavior [ask|auto-probe|leave-unknown|status]", "error");
     return;
   }
   const paths = getPaths(ctx);
@@ -1392,8 +1388,8 @@ export const _test = {
   seedPresetMapEntryIfMissing,
   refreshPresetMapEntry,
   refreshPresetKnowledgeForStoredEntries,
-  runAggressiveProbeForCurrentTier,
-  startAggressiveProbeForCurrentTier,
+  runAutoProbeForCurrentTier,
+  startAutoProbeForCurrentTier,
   setProbeTierForTest,
-  waitForAggressiveProbesForTest,
+  waitForAutoProbesForTest,
 };
