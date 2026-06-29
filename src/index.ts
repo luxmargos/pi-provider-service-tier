@@ -353,20 +353,7 @@ export function ensureConfig(path: string): ConfigFile {
 
 function migrateMapV1ToV2(value: unknown): ServiceTierMapFile {
   if (!isRecord(value)) return { ...DEFAULT_MAP };
-  const migratedEntries: Record<string, ServiceTierMapEntry> = {};
-  const entries = normalizeMapEntries(value.entries) ?? {};
-  for (const [key, entry] of Object.entries(entries)) {
-    if (
-      entry.source !== "user-mark" &&
-      !entry.determined &&
-      entry.tiers.length === 0 &&
-      !buildPresetMapEntry(entry).determined
-    ) {
-      continue;
-    }
-    migratedEntries[key] = entry;
-  }
-  return { version: 2, entries: migratedEntries };
+  return { version: 2, entries: normalizeMapEntries(value.entries) ?? {} };
 }
 
 function migrateMapToCurrent(value: unknown): ServiceTierMapFile {

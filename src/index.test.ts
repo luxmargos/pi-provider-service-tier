@@ -284,7 +284,7 @@ test("migrates config writes to v2 and drops legacy aggressiveProbe", () => {
   }
 });
 
-test("migrates v1 map by renaming supported to determined and removing fully unsupported entries", () => {
+test("migrates v1 map by renaming supported to determined and preserving unknown entries", () => {
   const cwd = tempDir();
   const home = tempDir();
   try {
@@ -322,7 +322,8 @@ test("migrates v1 map by renaming supported to determined and removing fully uns
     assert.equal(Boolean(map?.entries?.["openai/gpt-5.5"]), true);
     assert.equal(map?.entries?.["openai/gpt-legacy"].determined, true);
     assert.equal("supported" in (map?.entries?.["openai/gpt-legacy"] ?? {}), false);
-    assert.equal(map?.entries?.["openai/gpt-old"], undefined);
+    assert.equal(map?.entries?.["openai/gpt-old"].determined, false);
+    assert.equal(map?.entries?.["openai/gpt-old"].source, "error");
     const rawBeforeStartup = JSON.parse(readFileSync(paths.map, "utf8")) as { version?: number; entries?: Record<string, Record<string, unknown>> };
     assert.equal(rawBeforeStartup.version, 1);
     assert.equal(rawBeforeStartup.entries?.["openai/gpt-legacy"]?.supported, true);
@@ -331,7 +332,8 @@ test("migrates v1 map by renaming supported to determined and removing fully uns
     assert.equal(rawAfterStartup.version, 2);
     assert.equal(rawAfterStartup.entries?.["openai/gpt-legacy"]?.determined, true);
     assert.equal("supported" in (rawAfterStartup.entries?.["openai/gpt-legacy"] ?? {}), false);
-    assert.equal(rawAfterStartup.entries?.["openai/gpt-old"], undefined);
+    assert.equal(rawAfterStartup.entries?.["openai/gpt-old"]?.determined, false);
+    assert.equal(rawAfterStartup.entries?.["openai/gpt-old"]?.source, "error");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
