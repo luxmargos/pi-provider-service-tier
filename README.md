@@ -16,6 +16,7 @@ Use it when you want to turn on faster or paid priority tiers for one model with
 - Supports project-local settings and user-global defaults.
 - Provides simple `/service-tier-fast-*` commands for `service_tier: "priority"`.
 - Keeps a support map for status, prompts, preset refreshes, and provider error tracking.
+- Shows a bottom status indicator for the current service-tier setting.
 - Detects unsupported tier errors and updates the support map.
 
 The extension only injects `service_tier` when all of these are true:
@@ -24,7 +25,7 @@ The extension only injects `service_tier` when all of these are true:
 2. a service tier is configured for that pair, and
 3. the outgoing provider payload is an object that can receive `service_tier`.
 
-The support map does not block request-time injection. If you explicitly enable a tier for the current provider/model, the extension sends it and records provider errors if the provider rejects it.
+The support map does not block request-time injection. If you explicitly enable a tier for the current provider/model, the extension sends it from `before_provider_request` whenever the outgoing provider payload is an object. Provider errors are recorded afterward and the failed request is not retried automatically.
 
 > [!NOTE]
 > This extension injects the provider payload field `service_tier`. For Pi's built-in OpenAI providers, Pi also has an internal `serviceTier` stream option used for cost accounting. This extension is intentionally broader and payload-hook based, so it does not adjust Pi's internal cost multiplier.
@@ -192,6 +193,17 @@ Examples:
 
 Commands apply only to the current provider/model pair. Argument completions are available; type a command plus a space, then press Tab.
 
+### Status indicator
+
+The extension keeps a bottom floating status visible for the current model:
+
+- `service_tier ○ off` when this extension is inactive for the current provider/model.
+- `service_tier: ⚡ priority` when `priority` is active.
+- `service_tier: ● <tier>` for active non-priority tiers.
+- `unknown` is appended when the active tier is not recorded as supported in the support map.
+
+The status omits provider/model text because Pi already shows the selected provider and model. Supported active tiers are shown in green unless `NO_COLOR` is set.
+
 ### Refresh or unset support
 
 ```text
@@ -229,6 +241,8 @@ Tier and fast commands preserve `source: "probe"` map entries when the requested
 `aggressive` probes unknown support immediately after explicit tier/fast/refresh commands. `unknown` leaves unknown support unresolved without prompting. The command writes user-global config. Request-time injection still follows the active configured tier.
 
 In `ask` mode, the prompt is shown only when the map entry has `"determined": false` and `source` is not `"user-mark"`.
+
+The `ask` prompt shows a separate warning line that aggressive mode sends low-token probe requests for every known service tier and may consume provider tokens.
 
 `Use aggressive mode once` and `Use aggressive mode and do not ask again` start low-token current-model probes for every known service tier in the background and show progress notifications while provider results arrive. Requests sent while probing is in progress are not queued by this extension; they use the current active configuration and current stored support state. A completed probe cycle writes one `source: "probe"` map entry with complete `tiers` and `unsupportedTiers`. If any tier cannot be determined, the support map is not overwritten with partial probe results. Failed probes are not retried.
 
@@ -330,7 +344,7 @@ Preset support currently includes:
 | `openai-codex` + `openai-codex-responses` | fallback for other models | `priority` |
 | `opencode-go` + `openai-completions` | probed models in `presets/opencode-go.json` | model-specific; usually `priority`, `flex`, `default`, `auto`, `scale` |
 
-Other providers/models remain unknown unless refreshed from presets, learned from an unsupported provider error, or updated by an aggressive probe result.
+Other providers/models remain unknown unless refreshed from presets or updated by a completed aggressive probe result. Unsupported provider errors are recorded in the map for troubleshooting and future status, but they do not disable an active configured tier by themselves.
 
 ## Unsupported tier errors
 
@@ -340,6 +354,8 @@ If a provider returns an error indicating `service_tier` is unsupported or inval
 2. records it in `unsupportedTiers`,
 3. notifies the user, and
 4. does **not** retry the failed request.
+
+Future requests still follow the active project/user configuration. Disable or change the configured tier if you do not want the extension to send it again.
 
 ## Development
 

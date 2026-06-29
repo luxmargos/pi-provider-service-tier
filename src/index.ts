@@ -899,7 +899,11 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
   }
 
   const choice = await ctx.ui.select(
-    `service_tier=${tier} is not recorded in the support map for ${key}.`,
+    [
+      `service_tier=${tier} is not recorded in the support map for ${key}.`,
+      "",
+      "Aggressive mode sends low-token probe requests for every known service tier and may consume provider tokens.",
+    ].join("\n"),
     [...UNSUPPORTED_PROMPT_CHOICES],
   );
   const paths = getPaths(ctx);

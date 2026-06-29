@@ -91,6 +91,7 @@ function createExtensionHarness(cwd: string, home: string, model: never = openAI
   const notifications: Array<{ message: string; type?: string }> = [];
   const statuses: Array<{ key: string; value: string | undefined }> = [];
   const selections: string[] = [];
+  const prompts: string[] = [];
   const ctx = {
     cwd,
     model,
@@ -101,7 +102,10 @@ function createExtensionHarness(cwd: string, home: string, model: never = openAI
       notify: (message: string, type?: string) => notifications.push({ message, type }),
       setStatus: (key: string, value: string | undefined) => statuses.push({ key, value }),
       addAutocompleteProvider: () => undefined,
-      select: async () => selections.shift(),
+      select: async (message: string) => {
+        prompts.push(message);
+        return selections.shift();
+      },
     },
   } as never;
   const pi = {
@@ -122,6 +126,7 @@ function createExtensionHarness(cwd: string, home: string, model: never = openAI
     notifications,
     statuses,
     selections,
+    prompts,
     restore: () => {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -412,18 +417,11 @@ test("status text omits provider/model key", () => {
 });
 
 test("status text does not yellow-highlight off or unknown states", () => {
-  const previousNoColor = process.env.NO_COLOR;
-  delete process.env.NO_COLOR;
-  try {
-    const paths = configPaths("/repo", "/home/user");
-    const offConfig = mergeConfigs(undefined, undefined, paths);
-    assert.equal(_test.statusText(offConfig, { entries: {} }, openAIModel), "service_tier ○ off");
-    const unknownConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } }, undefined, paths);
-    assert.equal(_test.statusText(unknownConfig, { entries: {} }, openAIModel), "service_tier: ⚡ priority unknown");
-  } finally {
-    if (previousNoColor === undefined) delete process.env.NO_COLOR;
-    else process.env.NO_COLOR = previousNoColor;
-  }
+  const paths = configPaths("/repo", "/home/user");
+  const offConfig = mergeConfigs(undefined, undefined, paths);
+  assert.equal(_test.statusText(offConfig, { entries: {} }, openAIModel), "service_tier ○ off");
+  const unknownConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } }, undefined, paths);
+  assert.equal(_test.statusText(unknownConfig, { entries: {} }, openAIModel), "service_tier: ⚡ priority unknown");
 });
 
 test("payload helper adds top-level service_tier", () => {
@@ -804,6 +802,10 @@ test("ask flow runs aggressive-once probe immediately and persists success", asy
     const paths = configPaths(cwd, home);
     harness.selections.push("Use aggressive mode once");
     await harness.commands.get("service-tier-project")?.handler("flex", harness.ctx);
+    assert.equal(harness.prompts.length, 1);
+    assert.match(harness.prompts[0], /\n\nAggressive mode sends low-token probe requests/);
+    assert.match(harness.prompts[0], /low-token probe requests/);
+    assert.match(harness.prompts[0], /may consume provider tokens/);
     await _test.waitForAggressiveProbesForTest();
     const entry = readMap(paths.map)?.entries?.["opencode-go/minimax-m2.5"];
     assert.deepEqual(probedTiers, [...SERVICE_TIERS]);
