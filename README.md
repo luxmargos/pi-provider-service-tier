@@ -209,22 +209,22 @@ Refresh commands are preset-only and do not call providers. Unset commands do no
 ### Unsupported behavior
 
 ```text
-/service-tier-unsupported-behavior ask
-/service-tier-unsupported-behavior aggressive
-/service-tier-unsupported-behavior unsupported
-/service-tier-unsupported-behavior status
+/service-tier-unknown-behavior ask
+/service-tier-unknown-behavior aggressive
+/service-tier-unknown-behavior unknown
+/service-tier-unknown-behavior status
 ```
 
-`ask` is the default. When an explicit tier, fast, or refresh command selects a tier that stored support says is unsupported, Pi prompts with:
+`ask` is the default. When an explicit tier, fast, or refresh command selects a tier whose stored support is unknown, Pi prompts with:
 
 - `Use aggressive mode once`
 - `Use aggressive mode and do not ask again`
-- `Leave unsupported once`
-- `Leave unsupported and do not ask again`
+- `Leave unknown once`
+- `Leave unknown and do not ask again`
 
-`aggressive` injects the configured tier even when support is unknown or unsupported. `unsupported` leaves unknown or unsupported tiers uninjected. The command writes user-global config.
+`aggressive` injects the configured tier even when support is unknown. `unknown` leaves unknown tiers uninjected. The command writes user-global config.
 
-`Use aggressive mode once` authorizes one request and records the observed result in the user-global support map. A successful assistant response marks the tier supported; an unsupported `service_tier` provider error marks it unsupported. The failed request is not retried.
+`Use aggressive mode once` and `Use aggressive mode and do not ask again` work on the next provider request and show progress notifications while the extension waits for the provider result. A successful assistant response marks the tier supported; a `service_tier` provider error keeps support unknown. The failed request is not retried.
 
 ### Debug injection decisions
 
@@ -273,7 +273,7 @@ Example:
 ```json
 {
   "version": 2,
-  "unsupportedModelBehavior": "ask",
+  "unknownModelBehavior": "ask",
   "entries": {
     "openai/gpt-5.5": {
       "active": true,
@@ -287,7 +287,7 @@ Example:
 }
 ```
 
-`unsupportedModelBehavior` is optional and defaults to `ask`. Valid values are `ask`, `aggressive`, and `unsupported`. Use `/service-tier-unsupported-behavior [ask|aggressive|unsupported|status]` to manage the user-global setting, or set it manually in either config file. Project config overrides user config for this field.
+`unknownModelBehavior` is optional and defaults to `ask`. Valid values are `ask`, `aggressive`, and `unknown`. Use `/service-tier-unknown-behavior [ask|aggressive|unknown|status]` to manage the user-global setting, or set it manually in either config file. Project config overrides user config for this field.
 
 ## Support map schema
 

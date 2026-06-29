@@ -10,6 +10,8 @@ const CONFIG_BASENAME = "pi-provider-service-tier.json";
 const MAP_BASENAME = "pi-provider-service-tier-map.json";
 const STATUS_KEY = "pi-provider-service-tier";
 const STATUS_ICON = "⚡";
+const STATUS_OFF_ICON = "○";
+const STATUS_ACTIVE_ICON = "●";
 const ANSI_RESET = "\u001b[0m";
 const ANSI_GREEN = "\u001b[32m";
 const ANSI_YELLOW = "\u001b[33m";
@@ -26,13 +28,13 @@ const COMMAND_REFRESH_SUPPORT = "service-tier-refresh-support";
 const COMMAND_REFRESH_SUPPORT_ALL = "service-tier-refresh-support-all";
 const COMMAND_UNSET_SUPPORT = "service-tier-unset-support";
 const COMMAND_UNSET_SUPPORT_ALL = "service-tier-unset-support-all";
-const COMMAND_UNSUPPORTED_BEHAVIOR = "service-tier-unsupported-behavior";
+const COMMAND_UNKNOWN_BEHAVIOR = "service-tier-unknown-behavior";
 const COMMAND_DEBUG = "service-tier-debug";
 
 export const SERVICE_TIERS = ["priority", "flex", "default", "auto", "scale"] as const;
 export type ServiceTier = (typeof SERVICE_TIERS)[number];
-export const UNSUPPORTED_MODEL_BEHAVIORS = ["ask", "aggressive", "unsupported"] as const;
-export type UnsupportedModelBehavior = (typeof UNSUPPORTED_MODEL_BEHAVIORS)[number];
+export const UNKNOWN_MODEL_BEHAVIORS = ["ask", "aggressive", "unknown"] as const;
+export type UnknownModelBehavior = (typeof UNKNOWN_MODEL_BEHAVIORS)[number];
 
 export type ConfigScope = "project" | "user";
 export type MapSource = "preset" | "probe" | "error" | "manual";
@@ -44,12 +46,12 @@ export interface ServiceTierEntry {
 
 export interface ConfigFile {
   version?: number;
-  unsupportedModelBehavior?: UnsupportedModelBehavior;
+  unknownModelBehavior?: UnknownModelBehavior;
   entries?: Record<string, ServiceTierEntry>;
 }
 
 export interface EffectiveConfig {
-  unsupportedModelBehavior: UnsupportedModelBehavior;
+  unknownModelBehavior: UnknownModelBehavior;
   entries: Record<string, Required<ServiceTierEntry>>;
   paths: ConfigPaths;
 }
@@ -77,7 +79,7 @@ export interface ServiceTierMapFile {
   entries?: Record<string, ServiceTierMapEntry>;
 }
 
-const DEFAULT_UNSUPPORTED_MODEL_BEHAVIOR: UnsupportedModelBehavior = "ask";
+const DEFAULT_UNKNOWN_MODEL_BEHAVIOR: UnknownModelBehavior = "ask";
 
 const DEFAULT_CONFIG: ConfigFile = {
   version: CONFIG_VERSION,
@@ -93,7 +95,7 @@ interface LastAppliedTier {
   key: string;
   tier: ServiceTier;
   at: number;
-  aggressiveOnce?: boolean;
+  aggressiveAttempt?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -104,8 +106,8 @@ export function isServiceTier(value: unknown): value is ServiceTier {
   return typeof value === "string" && (SERVICE_TIERS as readonly string[]).includes(value);
 }
 
-export function isUnsupportedModelBehavior(value: unknown): value is UnsupportedModelBehavior {
-  return typeof value === "string" && (UNSUPPORTED_MODEL_BEHAVIORS as readonly string[]).includes(value);
+export function isUnknownModelBehavior(value: unknown): value is UnknownModelBehavior {
+  return typeof value === "string" && (UNKNOWN_MODEL_BEHAVIORS as readonly string[]).includes(value);
 }
 
 function uniqueTiers(values: readonly ServiceTier[]): ServiceTier[] {
@@ -264,8 +266,11 @@ export function readConfig(path: string): ConfigFile | undefined {
   if (parsed === undefined) return undefined;
   if (!isRecord(parsed)) return {};
   const config: ConfigFile = { version: CONFIG_VERSION };
-  if (isUnsupportedModelBehavior(parsed.unsupportedModelBehavior)) {
-    config.unsupportedModelBehavior = parsed.unsupportedModelBehavior;
+  const rawUnknownBehavior = parsed.unknownModelBehavior ?? parsed.unsupportedModelBehavior;
+  if (isUnknownModelBehavior(rawUnknownBehavior)) {
+    config.unknownModelBehavior = rawUnknownBehavior;
+  } else if (rawUnknownBehavior === "unsupported") {
+    config.unknownModelBehavior = "unknown";
   }
   const entries = normalizeEntries(parsed.entries);
   if (entries !== undefined) config.entries = entries;
@@ -275,7 +280,7 @@ export function readConfig(path: string): ConfigFile | undefined {
 export function writeConfig(path: string, config: ConfigFile): void {
   writeJsonFile(path, {
     version: CONFIG_VERSION,
-    ...(config.unsupportedModelBehavior ? { unsupportedModelBehavior: config.unsupportedModelBehavior } : {}),
+    ...(config.unknownModelBehavior ? { unknownModelBehavior: config.unknownModelBehavior } : {}),
     entries: config.entries ?? {},
   });
 }
@@ -329,8 +334,8 @@ export function mergeConfigs(userConfig: ConfigFile | undefined, projectConfig: 
     };
   }
   return {
-    unsupportedModelBehavior:
-      projectConfig?.unsupportedModelBehavior ?? userConfig?.unsupportedModelBehavior ?? DEFAULT_UNSUPPORTED_MODEL_BEHAVIOR,
+    unknownModelBehavior:
+      projectConfig?.unknownModelBehavior ?? userConfig?.unknownModelBehavior ?? DEFAULT_UNKNOWN_MODEL_BEHAVIOR,
     entries,
     paths,
   };
@@ -360,13 +365,13 @@ export function setScopedEntry(paths: ConfigPaths, scope: ConfigScope, key: stri
   return next;
 }
 
-export function setScopedUnsupportedModelBehavior(
+export function setScopedUnknownModelBehavior(
   paths: ConfigPaths,
   scope: ConfigScope,
-  unsupportedModelBehavior: UnsupportedModelBehavior,
+  unknownModelBehavior: UnknownModelBehavior,
 ): ConfigFile {
   const config = readScopeConfig(paths, scope);
-  const next = { ...config, unsupportedModelBehavior };
+  const next = { ...config, unknownModelBehavior };
   writeScopeConfig(paths, scope, next);
   return next;
 }
@@ -410,11 +415,11 @@ export function mapSupportState(
   map: ServiceTierMapFile | undefined,
   key: string | undefined,
   tier: ServiceTier | undefined,
-): "supported" | "unsupported" | "unknown" {
+): "supported" | "unknown" {
   if (!map?.entries || !key || !tier) return "unknown";
   const entry = map.entries[key];
   if (!entry) return "unknown";
-  return mapSupportsTier(map, key, tier) ? "supported" : "unsupported";
+  return mapSupportsTier(map, key, tier) ? "supported" : "unknown";
 }
 
 export function configuredTierForModel(config: EffectiveConfig, model: Model<Api> | undefined): ServiceTier | undefined {
@@ -491,10 +496,11 @@ function statusText(config: EffectiveConfig, map: ServiceTierMapFile, model: Mod
   const key = modelKey(model);
   if (!key) return undefined;
   const entry = config.entries[key];
-  if (!entry?.active) return undefined;
+  if (!entry?.active) return colorStatus(`${STATUS_OFF_ICON}off`, "yellow");
   const support = mapSupportState(map, key, entry.serviceTier);
   const supported = support === "supported";
-  const text = `${STATUS_ICON}${key} ${entry.serviceTier}${supported ? "" : ` ${support}`}`;
+  const prefix = entry.serviceTier === "priority" ? STATUS_ICON : STATUS_ACTIVE_ICON;
+  const text = `${prefix}${entry.serviceTier}${supported ? "" : ` ${support}`}`;
   return colorStatus(text, supported ? "green" : "yellow");
 }
 
@@ -517,6 +523,17 @@ function seedPresetMapEntryIfMissing(path: string, map: ServiceTierMapFile, mode
   return next;
 }
 
+function refreshPresetMapEntry(path: string, map: ServiceTierMapFile, model: Model<Api> | undefined): ServiceTierMapFile {
+  const key = modelKey(model);
+  if (!model || !key) return map;
+  const next = {
+    version: MAP_VERSION,
+    entries: { ...(map.entries ?? {}), [key]: buildPresetMapEntry(model) },
+  };
+  writeMap(path, next);
+  return next;
+}
+
 function loadState(ctx: ExtensionContext): { config: EffectiveConfig; map: ServiceTierMapFile } {
   const paths = getPaths(ctx);
   const config = mergeConfigs(readConfig(paths.user), readConfig(paths.project), paths);
@@ -531,8 +548,8 @@ function updateStatus(ctx: ExtensionContext): void {
 
 const AGGRESSIVE_ONCE_CHOICE = "Use aggressive mode once";
 const AGGRESSIVE_ALWAYS_CHOICE = "Use aggressive mode and do not ask again";
-const LEAVE_ONCE_CHOICE = "Leave unsupported once";
-const LEAVE_ALWAYS_CHOICE = "Leave unsupported and do not ask again";
+const LEAVE_ONCE_CHOICE = "Leave unknown once";
+const LEAVE_ALWAYS_CHOICE = "Leave unknown and do not ask again";
 const UNSUPPORTED_PROMPT_CHOICES = [AGGRESSIVE_ONCE_CHOICE, AGGRESSIVE_ALWAYS_CHOICE, LEAVE_ONCE_CHOICE, LEAVE_ALWAYS_CHOICE] as const;
 const aggressiveOnceAuthorizations = new Set<string>();
 
@@ -553,30 +570,34 @@ function consumeAggressiveOnce(key: string, tier: ServiceTier): boolean {
 
 async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<void> {
   const { config, map } = loadState(ctx);
-  if (mapSupportState(map, key, tier) !== "unsupported") return;
-  if (config.unsupportedModelBehavior === "aggressive") {
-    ctx.ui.notify(`service_tier=${tier} is marked unsupported for ${key}; aggressive behavior will still inject it.`, "warning");
+  if (mapSupportState(map, key, tier) !== "unknown") return;
+  if (config.unknownModelBehavior === "aggressive") {
+    ctx.ui.notify(`service_tier=${tier} support is unknown for ${key}; aggressive behavior will inject it and record the result.`, "warning");
     return;
   }
-  if (config.unsupportedModelBehavior === "unsupported") {
-    ctx.ui.notify(`service_tier=${tier} is marked unsupported for ${key}; it will not be injected.`, "info");
+  if (config.unknownModelBehavior === "unknown") {
+    ctx.ui.notify(`service_tier=${tier} support is unknown for ${key}; it will not be injected.`, "info");
     return;
   }
 
   const choice = await ctx.ui.select(
-    `service_tier=${tier} is marked unsupported for ${key}.`,
+    `service_tier=${tier} support is unknown for ${key}.`,
     [...UNSUPPORTED_PROMPT_CHOICES],
   );
   const paths = getPaths(ctx);
   if (choice === AGGRESSIVE_ONCE_CHOICE) {
     authorizeAggressiveOnce(key, tier);
-    ctx.ui.notify(`service_tier=${tier} will be injected once for ${key}; the result will update ${MAP_BASENAME}.`, "warning");
+    ctx.ui.notify(`service_tier=${tier} will be injected on the next request for ${key}; waiting for provider result to update ${MAP_BASENAME}.`, "warning");
     return;
   }
   if (choice === AGGRESSIVE_ALWAYS_CHOICE) {
-    setScopedUnsupportedModelBehavior(paths, "user", "aggressive");
+    setScopedUnknownModelBehavior(paths, "user", "aggressive");
+    authorizeAggressiveOnce(key, tier);
     updateStatus(ctx);
-    ctx.ui.notify("user-global unsupportedModelBehavior set to aggressive.", "warning");
+    ctx.ui.notify(
+      `user-global unknownModelBehavior set to aggressive; service_tier=${tier} will be injected on the next request for ${key} and the result will be recorded.`,
+      "warning",
+    );
     return;
   }
   if (choice === LEAVE_ONCE_CHOICE) {
@@ -584,9 +605,9 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
     return;
   }
   if (choice === LEAVE_ALWAYS_CHOICE) {
-    setScopedUnsupportedModelBehavior(paths, "user", "unsupported");
+    setScopedUnknownModelBehavior(paths, "user", "unknown");
     updateStatus(ctx);
-    ctx.ui.notify("user-global unsupportedModelBehavior set to unsupported.", "info");
+    ctx.ui.notify("user-global unknownModelBehavior set to unknown.", "info");
     return;
   }
   ctx.ui.notify("Unsupported service_tier choice cancelled; no behavior changed.", "info");
@@ -610,9 +631,9 @@ function notifyScopeStatus(ctx: ExtensionCommandContext, scope: ConfigScope): vo
     [
       `${scope} service tier for ${key}: ${scoped?.active ? scoped.serviceTier ?? "priority" : scoped?.active === false ? "off" : "unset"}`,
       `effective: ${effective?.active ? effective.serviceTier : "off"}`,
-      `map: ${mapEntry ? (mapEntry.supported ? mapEntry.tiers.join(", ") || "none" : "unsupported") : "unknown"}`,
+      `map: ${mapEntry ? (mapEntry.supported ? mapEntry.tiers.join(", ") || "none" : "unknown") : "unknown"}`,
       `support: ${support}`,
-      `unsupportedBehavior: ${config.unsupportedModelBehavior}`,
+      `unknownBehavior: ${config.unknownModelBehavior}`,
     ].join("; "),
     "info",
   );
@@ -620,12 +641,12 @@ function notifyScopeStatus(ctx: ExtensionCommandContext, scope: ConfigScope): vo
 
 const TIER_COMMAND_ARGS = [...SERVICE_TIERS, "off", "status"] as const;
 const TOGGLE_COMMAND_ARGS = ["on", "off", "status"] as const;
-const UNSUPPORTED_BEHAVIOR_COMMAND_ARGS = [...UNSUPPORTED_MODEL_BEHAVIORS, "status"] as const;
+const UNKNOWN_BEHAVIOR_COMMAND_ARGS = [...UNKNOWN_MODEL_BEHAVIORS, "status"] as const;
 
 type CompletionValue =
   | (typeof TIER_COMMAND_ARGS)[number]
   | (typeof TOGGLE_COMMAND_ARGS)[number]
-  | (typeof UNSUPPORTED_BEHAVIOR_COMMAND_ARGS)[number];
+  | (typeof UNKNOWN_BEHAVIOR_COMMAND_ARGS)[number];
 
 function valueCompletions(values: readonly CompletionValue[], prefix: string) {
   const clean = prefix.trim().toLowerCase();
@@ -641,8 +662,8 @@ function fastCompletions(prefix: string) {
   return valueCompletions(TOGGLE_COMMAND_ARGS, prefix);
 }
 
-function unsupportedBehaviorCompletions(prefix: string) {
-  return valueCompletions(UNSUPPORTED_BEHAVIOR_COMMAND_ARGS, prefix);
+function unknownBehaviorCompletions(prefix: string) {
+  return valueCompletions(UNKNOWN_BEHAVIOR_COMMAND_ARGS, prefix);
 }
 
 function debugCompletions(prefix: string) {
@@ -660,7 +681,7 @@ function installCommandArgumentAutocomplete(ctx: ExtensionContext): void {
         [COMMAND_FAST_USER]: fastCompletions,
         [COMMAND_FAST_PROJECT_ALIAS]: fastCompletions,
         [COMMAND_FAST_USER_ALIAS]: fastCompletions,
-        [COMMAND_UNSUPPORTED_BEHAVIOR]: unsupportedBehaviorCompletions,
+        [COMMAND_UNKNOWN_BEHAVIOR]: unknownBehaviorCompletions,
         [COMMAND_DEBUG]: debugCompletions,
       };
 
@@ -703,7 +724,7 @@ async function handleTierCommand(scope: ConfigScope, args: string, ctx: Extensio
   }
   if (isServiceTier(arg)) {
     setScopedEntry(paths, scope, key, { active: true, serviceTier: arg });
-    seedPresetMapEntryIfMissing(paths.map, ensureMap(paths.map), ctx.model);
+    refreshPresetMapEntry(paths.map, ensureMap(paths.map), ctx.model);
     updateStatus(ctx);
     ctx.ui.notify(`${scope} service tier ${arg} enabled for ${key}.`, "info");
     await evaluateUnsupportedAfterExplicitCommand(ctx, key, arg);
@@ -725,38 +746,38 @@ async function handleFastCommand(scope: ConfigScope, args: string, ctx: Extensio
   const scopedEntry = readScopeConfig(paths, scope).entries?.[key];
   const turnOn = arg === "on" ? true : arg === "off" ? false : !(scopedEntry?.active && scopedEntry.serviceTier === "priority");
   setScopedEntry(paths, scope, key, turnOn ? { active: true, serviceTier: "priority" } : { active: false });
-  if (turnOn) seedPresetMapEntryIfMissing(paths.map, ensureMap(paths.map), ctx.model);
+  if (turnOn) refreshPresetMapEntry(paths.map, ensureMap(paths.map), ctx.model);
   updateStatus(ctx);
   ctx.ui.notify(`${scope} fast mode ${turnOn ? "enabled" : "disabled"} for ${key}.`, "info");
   if (turnOn) await evaluateUnsupportedAfterExplicitCommand(ctx, key, "priority");
 }
 
-function unsupportedBehaviorScopeValue(config: ConfigFile | undefined): UnsupportedModelBehavior | "unset" {
-  return config?.unsupportedModelBehavior ?? "unset";
+function unknownBehaviorScopeValue(config: ConfigFile | undefined): UnknownModelBehavior | "unset" {
+  return config?.unknownModelBehavior ?? "unset";
 }
 
-function notifyUnsupportedBehaviorStatus(ctx: ExtensionCommandContext): void {
+function notifyUnknownBehaviorStatus(ctx: ExtensionCommandContext): void {
   const paths = getPaths(ctx);
   const userConfig = readConfig(paths.user);
   const projectConfig = readConfig(paths.project);
   const effective = mergeConfigs(userConfig, projectConfig, paths);
   ctx.ui.notify(
-    `unsupportedModelBehavior is ${effective.unsupportedModelBehavior} (project: ${unsupportedBehaviorScopeValue(projectConfig)}; user: ${unsupportedBehaviorScopeValue(userConfig)}).`,
+    `unknownModelBehavior is ${effective.unknownModelBehavior} (project: ${unknownBehaviorScopeValue(projectConfig)}; user: ${unknownBehaviorScopeValue(userConfig)}).`,
     "info",
   );
 }
 
-async function handleUnsupportedBehaviorCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
+async function handleUnknownBehaviorCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
   const arg = args.trim().toLowerCase();
-  if (!arg || arg === "status") return notifyUnsupportedBehaviorStatus(ctx);
-  if (!isUnsupportedModelBehavior(arg)) {
-    ctx.ui.notify("Usage: /service-tier-unsupported-behavior [ask|aggressive|unsupported|status]", "error");
+  if (!arg || arg === "status") return notifyUnknownBehaviorStatus(ctx);
+  if (!isUnknownModelBehavior(arg)) {
+    ctx.ui.notify("Usage: /service-tier-unknown-behavior [ask|aggressive|unknown|status]", "error");
     return;
   }
   const paths = getPaths(ctx);
-  setScopedUnsupportedModelBehavior(paths, "user", arg);
+  setScopedUnknownModelBehavior(paths, "user", arg);
   updateStatus(ctx);
-  ctx.ui.notify(`user-global unsupportedModelBehavior set to ${arg}.`, arg === "aggressive" ? "warning" : "info");
+  ctx.ui.notify(`user-global unknownModelBehavior set to ${arg}.`, arg === "aggressive" ? "warning" : "info");
 }
 
 function upsertMapEntry(path: string, entry: ServiceTierMapEntry): ServiceTierMapFile {
@@ -790,7 +811,7 @@ async function handleRefreshSupport(ctx: ExtensionCommandContext): Promise<void>
   const entry = buildPresetMapEntry(ctx.model);
   upsertMapEntry(paths.map, entry);
   updateStatus(ctx);
-  ctx.ui.notify(`service_tier support refreshed for ${entry.provider}/${entry.id}: ${entry.tiers.join(", ") || "unsupported"}.`, "info");
+  ctx.ui.notify(`service_tier support refreshed for ${entry.provider}/${entry.id}: ${entry.tiers.join(", ") || "unknown"}.`, "info");
   const { config } = loadState(ctx);
   const tier = configuredTierForModel(config, ctx.model);
   if (tier) await evaluateUnsupportedAfterExplicitCommand(ctx, key, tier);
@@ -911,10 +932,10 @@ export default function piServiceTier(pi: ExtensionAPI): void {
     handler: commandHandler(async (_args, ctx) => handleUnsetSupportAll(ctx)),
   });
 
-  pi.registerCommand(COMMAND_UNSUPPORTED_BEHAVIOR, {
-    description: "Set user-global behavior for unsupported service_tier selections",
-    getArgumentCompletions: unsupportedBehaviorCompletions,
-    handler: commandHandler((args, ctx) => handleUnsupportedBehaviorCommand(args, ctx)),
+  pi.registerCommand(COMMAND_UNKNOWN_BEHAVIOR, {
+    description: "Set user-global behavior for unknown service_tier support",
+    getArgumentCompletions: unknownBehaviorCompletions,
+    handler: commandHandler((args, ctx) => handleUnknownBehaviorCommand(args, ctx)),
   });
 
   pi.registerCommand(COMMAND_DEBUG, {
@@ -963,8 +984,9 @@ export default function piServiceTier(pi: ExtensionAPI): void {
     const tier = configuredTierForModel(config, ctx.model);
     const supported = mapSupportsTier(map, key, tier);
     const aggressiveOnce = key && tier ? consumeAggressiveOnce(key, tier) : false;
-    const aggressive = config.unsupportedModelBehavior === "aggressive";
+    const aggressive = config.unknownModelBehavior === "aggressive";
     const shouldInject = supported || aggressive || aggressiveOnce;
+    const aggressiveAttempt = !supported && (aggressive || aggressiveOnce);
     const nextPayload = tier ? payloadWithServiceTier(event.payload, tier) : undefined;
     if (!key || !tier || !shouldInject || nextPayload === undefined) {
       if (debugEnabled) {
@@ -976,7 +998,13 @@ export default function piServiceTier(pi: ExtensionAPI): void {
       }
       return undefined;
     }
-    lastApplied = { key, tier, at: Date.now(), aggressiveOnce: !!aggressiveOnce };
+    lastApplied = { key, tier, at: Date.now(), aggressiveAttempt: !!aggressiveAttempt };
+    if (aggressiveAttempt) {
+      ctx.ui.notify(
+        `service_tier=${tier} aggressive injection started for ${key}; waiting for provider result to update ${MAP_BASENAME}.`,
+        "warning",
+      );
+    }
     if (debugEnabled) {
       ctx.ui.notify(`service_tier debug: injected service_tier=${tier} into ${key} request.`, "info");
     }
@@ -991,11 +1019,11 @@ export default function piServiceTier(pi: ExtensionAPI): void {
       return;
     }
     const errorMessage = event.message.errorMessage;
-    if (lastApplied.aggressiveOnce && errorMessage && !isUnsupportedServiceTierError(errorMessage)) {
+    if (lastApplied.aggressiveAttempt && errorMessage && !isUnsupportedServiceTierError(errorMessage)) {
       lastApplied = undefined;
       return;
     }
-    if (!isUnsupportedServiceTierError(errorMessage) && !lastApplied.aggressiveOnce) return;
+    if (!isUnsupportedServiceTierError(errorMessage) && !lastApplied.aggressiveAttempt) return;
     const paths = getPaths(ctx);
     const map = ensureMap(paths.map);
     const next = isUnsupportedServiceTierError(errorMessage)
@@ -1006,7 +1034,7 @@ export default function piServiceTier(pi: ExtensionAPI): void {
     refreshStatus(ctx);
     if (isUnsupportedServiceTierError(errorMessage)) {
       ctx.ui.notify(
-        `service_tier=${lastApplied.tier} is unsupported for ${lastApplied.key}; updated ${MAP_BASENAME}. The failed request was not retried.`,
+        `service_tier=${lastApplied.tier} support remains unknown for ${lastApplied.key}; updated ${MAP_BASENAME}. The failed request was not retried.`,
         "warning",
       );
     } else {
@@ -1021,12 +1049,14 @@ export const _test = {
   MAP_BASENAME,
   STATUS_KEY,
   STATUS_ICON,
+  STATUS_OFF_ICON,
+  STATUS_ACTIVE_ICON,
   ANSI_RESET,
   ANSI_GREEN,
   ANSI_YELLOW,
   DEFAULT_CONFIG,
   DEFAULT_MAP,
-  DEFAULT_UNSUPPORTED_MODEL_BEHAVIOR,
+  DEFAULT_UNKNOWN_MODEL_BEHAVIOR,
   PACKAGE_NAME,
   COMMAND_FAST_PROJECT,
   COMMAND_FAST_USER,
@@ -1038,18 +1068,19 @@ export const _test = {
   COMMAND_REFRESH_SUPPORT_ALL,
   COMMAND_UNSET_SUPPORT,
   COMMAND_UNSET_SUPPORT_ALL,
-  COMMAND_UNSUPPORTED_BEHAVIOR,
+  COMMAND_UNKNOWN_BEHAVIOR,
   COMMAND_DEBUG,
   TIER_COMMAND_ARGS,
   TOGGLE_COMMAND_ARGS,
-  UNSUPPORTED_BEHAVIOR_COMMAND_ARGS,
+  UNKNOWN_BEHAVIOR_COMMAND_ARGS,
   valueCompletions,
-  unsupportedBehaviorCompletions,
-  unsupportedBehaviorScopeValue,
+  unknownBehaviorCompletions,
+  unknownBehaviorScopeValue,
   payloadWithServiceTier,
   statusText,
   colorStatus,
   seedPresetMapEntryIfMissing,
+  refreshPresetMapEntry,
   authorizeAggressiveOnce,
   consumeAggressiveOnce,
 };
