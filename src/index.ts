@@ -14,7 +14,6 @@ const STATUS_OFF_ICON = "○";
 const STATUS_ACTIVE_ICON = "●";
 const ANSI_RESET = "\u001b[0m";
 const ANSI_GREEN = "\u001b[32m";
-const ANSI_YELLOW = "\u001b[33m";
 const CONFIG_VERSION = 2;
 const MAP_VERSION = 2;
 
@@ -486,22 +485,22 @@ export function markTierSupported(map: ServiceTierMapFile, key: string, tier: Se
   return { version: MAP_VERSION, entries };
 }
 
-function colorStatus(text: string, color: "green" | "yellow"): string {
+function colorStatus(text: string, color?: "green"): string {
+  if (!color) return text;
   if (process.env.NO_COLOR) return text;
-  const ansi = color === "green" ? ANSI_GREEN : ANSI_YELLOW;
-  return `${ansi}${text}${ANSI_RESET}`;
+  return `${ANSI_GREEN}${text}${ANSI_RESET}`;
 }
 
 function statusText(config: EffectiveConfig, map: ServiceTierMapFile, model: Model<Api> | undefined): string | undefined {
   const key = modelKey(model);
   if (!key) return undefined;
   const entry = config.entries[key];
-  if (!entry?.active) return colorStatus(`${STATUS_OFF_ICON}off`, "yellow");
+  if (!entry?.active) return colorStatus(`${STATUS_OFF_ICON} off`);
   const support = mapSupportState(map, key, entry.serviceTier);
   const supported = support === "supported";
   const prefix = entry.serviceTier === "priority" ? STATUS_ICON : STATUS_ACTIVE_ICON;
-  const text = `${prefix}${entry.serviceTier}${supported ? "" : ` ${support}`}`;
-  return colorStatus(text, supported ? "green" : "yellow");
+  const text = `${prefix} ${entry.serviceTier}${supported ? "" : ` ${support}`}`;
+  return colorStatus(text, supported ? "green" : undefined);
 }
 
 function getCwd(ctx: ExtensionContext): string {
@@ -1053,7 +1052,6 @@ export const _test = {
   STATUS_ACTIVE_ICON,
   ANSI_RESET,
   ANSI_GREEN,
-  ANSI_YELLOW,
   DEFAULT_CONFIG,
   DEFAULT_MAP,
   DEFAULT_UNKNOWN_MODEL_BEHAVIOR,

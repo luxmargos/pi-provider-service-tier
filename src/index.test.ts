@@ -357,14 +357,29 @@ test("status text omits provider/model key", () => {
     const paths = configPaths("/repo", "/home/user");
     const config = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } }, undefined, paths);
     const map = { entries: { "openai/gpt-5.5": buildPresetMapEntry(openAIModel) } };
-    assert.equal(_test.statusText(config, map, openAIModel), "⚡priority");
-    assert.equal(_test.statusText(config, { entries: {} }, openAIModel), "⚡priority unknown");
+    assert.equal(_test.statusText(config, map, openAIModel), "⚡ priority");
+    assert.equal(_test.statusText(config, { entries: {} }, openAIModel), "⚡ priority unknown");
     const flexConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "flex" } } }, undefined, paths);
-    assert.equal(_test.statusText(flexConfig, map, openAIModel), "●flex");
+    assert.equal(_test.statusText(flexConfig, map, openAIModel), "● flex");
     const offConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: false, serviceTier: "priority" } } }, undefined, paths);
-    assert.equal(_test.statusText(offConfig, map, openAIModel), "○off");
+    assert.equal(_test.statusText(offConfig, map, openAIModel), "○ off");
     const unsetConfig = mergeConfigs(undefined, undefined, paths);
-    assert.equal(_test.statusText(unsetConfig, map, openAIModel), "○off");
+    assert.equal(_test.statusText(unsetConfig, map, openAIModel), "○ off");
+  } finally {
+    if (previousNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = previousNoColor;
+  }
+});
+
+test("status text does not yellow-highlight off or unknown states", () => {
+  const previousNoColor = process.env.NO_COLOR;
+  delete process.env.NO_COLOR;
+  try {
+    const paths = configPaths("/repo", "/home/user");
+    const offConfig = mergeConfigs(undefined, undefined, paths);
+    assert.equal(_test.statusText(offConfig, { entries: {} }, openAIModel), "○ off");
+    const unknownConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } }, undefined, paths);
+    assert.equal(_test.statusText(unknownConfig, { entries: {} }, openAIModel), "⚡ priority unknown");
   } finally {
     if (previousNoColor === undefined) delete process.env.NO_COLOR;
     else process.env.NO_COLOR = previousNoColor;
