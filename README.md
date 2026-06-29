@@ -15,14 +15,16 @@ Use it when you want to turn on faster or paid priority tiers for one model with
 - Scopes settings to the current `provider/model` pair.
 - Supports project-local settings and user-global defaults.
 - Provides simple `/service-tier-fast-*` commands for `service_tier: "priority"`.
-- Keeps a support map so unsupported provider/model pairs are not modified.
+- Keeps a support map for status, prompts, preset refreshes, and provider error tracking.
 - Detects unsupported tier errors and updates the support map.
 
 The extension only injects `service_tier` when all of these are true:
 
 1. the current `provider/model` pair is active in the effective config,
 2. a service tier is configured for that pair, and
-3. the support map says that tier is supported for that pair, or unknown behavior explicitly authorizes an aggressive injection.
+3. the outgoing provider payload is an object that can receive `service_tier`.
+
+The support map does not block request-time injection. If you explicitly enable a tier for the current provider/model, the extension sends it and records provider errors if the provider rejects it.
 
 > [!NOTE]
 > This extension injects the provider payload field `service_tier`. For Pi's built-in OpenAI providers, Pi also has an internal `serviceTier` stream option used for cost accounting. This extension is intentionally broader and payload-hook based, so it does not adjust Pi's internal cost multiplier.
@@ -32,7 +34,7 @@ The extension only injects `service_tier` when all of these are true:
 - Pi installed and available as `pi`.
 - Node.js `>=22`.
 - `git`, if installing directly from GitHub.
-- A provider/model that supports `service_tier` if you want injection to happen.
+- A provider/model that supports `service_tier` if you want injected requests to succeed.
 
 ## Quick start
 
@@ -224,7 +226,7 @@ Tier and fast commands preserve `source: "probe"` map entries when the requested
 - `Leave unknown once`
 - `Leave unknown and do not ask again`
 
-`aggressive` injects the configured tier even when support is unknown. `unknown` leaves unknown tiers uninjected. The command writes user-global config.
+`aggressive` probes unknown support immediately after explicit tier/fast/refresh commands. `unknown` leaves unknown support unresolved without prompting. The command writes user-global config. Request-time injection still follows the active configured tier.
 
 In `ask` mode, the prompt is shown only when the map entry has `"determined": false` and `source` is not `"user-mark"`.
 

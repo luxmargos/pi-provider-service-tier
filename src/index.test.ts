@@ -387,10 +387,10 @@ test("status text omits provider/model key", () => {
     const paths = configPaths("/repo", "/home/user");
     const config = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } }, undefined, paths);
     const map = { entries: { "openai/gpt-5.5": buildPresetMapEntry(openAIModel) } };
-    assert.equal(_test.statusText(config, map, openAIModel), "service_tier ⚡ priority");
-    assert.equal(_test.statusText(config, { entries: {} }, openAIModel), "service_tier ⚡ priority unknown");
+    assert.equal(_test.statusText(config, map, openAIModel), "service_tier: ⚡ priority");
+    assert.equal(_test.statusText(config, { entries: {} }, openAIModel), "service_tier: ⚡ priority unknown");
     const flexConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "flex" } } }, undefined, paths);
-    assert.equal(_test.statusText(flexConfig, map, openAIModel), "service_tier ● flex");
+    assert.equal(_test.statusText(flexConfig, map, openAIModel), "service_tier: ● flex");
     const offConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: false, serviceTier: "priority" } } }, undefined, paths);
     assert.equal(_test.statusText(offConfig, map, openAIModel), "service_tier ○ off");
     const unsetConfig = mergeConfigs(undefined, undefined, paths);
@@ -409,7 +409,7 @@ test("status text does not yellow-highlight off or unknown states", () => {
     const offConfig = mergeConfigs(undefined, undefined, paths);
     assert.equal(_test.statusText(offConfig, { entries: {} }, openAIModel), "service_tier ○ off");
     const unknownConfig = mergeConfigs({ entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } }, undefined, paths);
-    assert.equal(_test.statusText(unknownConfig, { entries: {} }, openAIModel), "service_tier ⚡ priority unknown");
+    assert.equal(_test.statusText(unknownConfig, { entries: {} }, openAIModel), "service_tier: ⚡ priority unknown");
   } finally {
     if (previousNoColor === undefined) delete process.env.NO_COLOR;
     else process.env.NO_COLOR = previousNoColor;
@@ -933,7 +933,7 @@ test("unsupported errors update map without retry", async () => {
   const harness = createExtensionHarness(cwd, home);
   try {
     const paths = configPaths(cwd, home);
-    writeConfig(paths.user, { unknownModelBehavior: "aggressive", entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } });
+    writeConfig(paths.user, { entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } });
     writeMap(paths.map, { entries: {} });
     const payload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "gpt-5.5" } } as never, harness.ctx);
     assert.deepEqual(payload, { model: "gpt-5.5", service_tier: "priority" });
@@ -949,13 +949,13 @@ test("unsupported errors update map without retry", async () => {
   }
 });
 
-test("request-time aggressive injection does not persist support on success", async () => {
+test("configured request-time injection does not persist support on success", async () => {
   const cwd = tempDir();
   const home = tempDir();
   const harness = createExtensionHarness(cwd, home);
   try {
     const paths = configPaths(cwd, home);
-    writeConfig(paths.user, { unknownModelBehavior: "aggressive", entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } });
+    writeConfig(paths.user, { entries: { "openai/gpt-5.5": { active: true, serviceTier: "priority" } } });
     writeMap(paths.map, { entries: {} });
     const payload = await harness.handlers.get("before_provider_request")?.({ payload: { model: "gpt-5.5" } } as never, harness.ctx);
     assert.deepEqual(payload, { model: "gpt-5.5", service_tier: "priority" });

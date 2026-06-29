@@ -637,7 +637,7 @@ function statusText(config: EffectiveConfig, map: ServiceTierMapFile, model: Mod
   const support = mapSupportState(map, key, entry.serviceTier);
   const supported = support === "supported";
   const prefix = entry.serviceTier === "priority" ? STATUS_ICON : STATUS_ACTIVE_ICON;
-  const text = `${STATUS_LABEL} ${prefix} ${entry.serviceTier}${supported ? "" : ` ${support}`}`;
+  const text = `${STATUS_LABEL}: ${prefix} ${entry.serviceTier}${supported ? "" : ` ${support}`}`;
   return colorStatus(text, supported ? "green" : undefined);
 }
 
@@ -1280,14 +1280,11 @@ export default function piServiceTier(pi: ExtensionAPI): void {
   });
 
   pi.on("before_provider_request", async (event, ctx) => {
-    const { config, map } = getCachedState(ctx);
+    const { config } = getCachedState(ctx);
     const key = modelKey(ctx.model);
     const tier = configuredTierForModel(config, ctx.model);
-    const supported = mapSupportsTier(map, key, tier);
-    const aggressive = config.unknownModelBehavior === "aggressive";
-    const shouldInject = supported || aggressive;
     const nextPayload = tier ? payloadWithServiceTier(event.payload, tier) : undefined;
-    if (!key || !tier || !shouldInject || nextPayload === undefined) {
+    if (!key || !tier || nextPayload === undefined) {
       if (debugEnabled) {
         const requestedTier = key ? config.entries[key]?.serviceTier : undefined;
         ctx.ui.notify(
