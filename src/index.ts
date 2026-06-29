@@ -878,7 +878,7 @@ const UNSUPPORTED_PROMPT_CHOICES = [AGGRESSIVE_ONCE_CHOICE, AGGRESSIVE_ALWAYS_CH
 async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<void> {
   const { config, map } = loadState(ctx);
   if (config.unknownModelBehavior === "aggressive") {
-    ctx.ui.notify(`service_tier=${tier} aggressive behavior will probe all service tiers for ${key} now.`, "warning");
+    ctx.ui.notify(`service_tier=${tier} aggressive behavior will probe all service tiers for ${key} now.`, "info");
     startAggressiveProbeForCurrentTier(ctx, key, tier);
     return;
   }
@@ -894,12 +894,12 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
   }
   if (mapSupportState(map, key, tier) !== "unknown") return;
   if (config.unknownModelBehavior === "unknown") {
-    ctx.ui.notify(`service_tier=${tier} support is unknown for ${key}; configured requests will still send it.`, "info");
+    ctx.ui.notify(`service_tier=${tier} is not recorded in the support map for ${key}; active configuration will still send it.`, "info");
     return;
   }
 
   const choice = await ctx.ui.select(
-    `service_tier=${tier} support is unknown for ${key}.`,
+    `service_tier=${tier} is not recorded in the support map for ${key}.`,
     [...UNSUPPORTED_PROMPT_CHOICES],
   );
   const paths = getPaths(ctx);
@@ -910,7 +910,7 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
   if (choice === AGGRESSIVE_ALWAYS_CHOICE) {
     setScopedUnknownModelBehavior(paths, "user", "aggressive");
     updateStatus(ctx);
-    ctx.ui.notify(`user-global unknownModelBehavior set to aggressive; probing service_tier=${tier} for ${key} now.`, "warning");
+    ctx.ui.notify(`user-global unknownModelBehavior set to aggressive; probing service_tier=${tier} for ${key} now.`, "info");
     startAggressiveProbeForCurrentTier(ctx, key, tier);
     return;
   }
@@ -1098,7 +1098,7 @@ async function handleUnknownBehaviorCommand(args: string, ctx: ExtensionCommandC
   const paths = getPaths(ctx);
   setScopedUnknownModelBehavior(paths, "user", arg);
   updateStatus(ctx);
-  ctx.ui.notify(`user-global unknownModelBehavior set to ${arg}.`, arg === "aggressive" ? "warning" : "info");
+  ctx.ui.notify(`user-global unknownModelBehavior set to ${arg}.`, "info");
 }
 
 function upsertMapEntry(path: string, entry: ServiceTierMapEntry): ServiceTierMapFile {
@@ -1341,7 +1341,7 @@ export default function piServiceTier(pi: ExtensionAPI): void {
     invalidateStateCache();
     refreshStatus(ctx);
     ctx.ui.notify(
-      `service_tier=${lastApplied.tier} support remains unknown for ${lastApplied.key}; updated ${MAP_BASENAME}. The failed request was not retried.`,
+      `service_tier=${lastApplied.tier} failed for ${lastApplied.key}; updated ${MAP_BASENAME}. The failed request was not retried.`,
       "warning",
     );
     lastApplied = undefined;
