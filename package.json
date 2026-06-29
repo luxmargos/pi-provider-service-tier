@@ -26,6 +26,7 @@
     "bench:service-tier:swap": "PST_BENCH_START_WITH=tier node scripts/benchmark-service-tier.mjs",
     "check": "npm run typecheck && npm test && npm run pack:dry-run",
     "pack:dry-run": "npm pack --dry-run",
+    "prepublishOnly": "npm run check",
     "test": "node --test --experimental-strip-types src/index.test.ts",
     "typecheck": "tsc --noEmit"
   },
