@@ -783,6 +783,7 @@ async function defaultProbeTier(model: Model<Api>, tier: ServiceTier, ctx: Exten
 }
 
 let probeTier: ProbeTierFunction = defaultProbeTier;
+const activeAggressiveProbes = new Set<Promise<ProbeTierResult>>();
 
 function setProbeTierForTest(next: ProbeTierFunction): () => void {
   const previous = probeTier;
@@ -790,6 +791,12 @@ function setProbeTierForTest(next: ProbeTierFunction): () => void {
   return () => {
     probeTier = previous;
   };
+}
+
+async function waitForAggressiveProbesForTest(): Promise<void> {
+  while (activeAggressiveProbes.size > 0) {
+    await Promise.allSettled([...activeAggressiveProbes]);
+  }
 }
 
 async function runAggressiveProbeForCurrentTier(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<ProbeTierResult> {
@@ -848,6 +855,20 @@ async function runAggressiveProbeForCurrentTier(ctx: ExtensionCommandContext, ke
   return determinedResults[tier];
 }
 
+function startAggressiveProbeForCurrentTier(ctx: ExtensionCommandContext, key: string, tier: ServiceTier): Promise<ProbeTierResult> {
+  const promise = runAggressiveProbeForCurrentTier(ctx, key, tier).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    ctx.ui.notify(`service_tier aggressive probe failed for ${key}: ${message}`, "error");
+    updateStatus(ctx);
+    return "unknown" as const;
+  });
+  activeAggressiveProbes.add(promise);
+  void promise.finally(() => {
+    activeAggressiveProbes.delete(promise);
+  });
+  return promise;
+}
+
 const AGGRESSIVE_ONCE_CHOICE = "Use aggressive mode once";
 const AGGRESSIVE_ALWAYS_CHOICE = "Use aggressive mode and do not ask again";
 const LEAVE_ONCE_CHOICE = "Leave unknown once";
@@ -858,22 +879,22 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
   const { config, map } = loadState(ctx);
   if (config.unknownModelBehavior === "aggressive") {
     ctx.ui.notify(`service_tier=${tier} aggressive behavior will probe all service tiers for ${key} now.`, "warning");
-    await runAggressiveProbeForCurrentTier(ctx, key, tier);
+    startAggressiveProbeForCurrentTier(ctx, key, tier);
     return;
   }
   const mapEntry = map.entries?.[key];
   if (mapEntry?.determined) {
     if (mapSupportsTier(map, key, tier)) return;
-    ctx.ui.notify(`service_tier=${tier} is not supported for ${key}; it will not be injected.`, "info");
+    ctx.ui.notify(`service_tier=${tier} is not supported by the support map for ${key}; configured requests will still send it.`, "info");
     return;
   }
   if (mapEntry?.source === "user-mark") {
-    ctx.ui.notify(`service_tier=${tier} was left unknown for ${key}; it will not be injected.`, "info");
+    ctx.ui.notify(`service_tier=${tier} was left unknown for ${key}; configured requests will still send it.`, "info");
     return;
   }
   if (mapSupportState(map, key, tier) !== "unknown") return;
   if (config.unknownModelBehavior === "unknown") {
-    ctx.ui.notify(`service_tier=${tier} support is unknown for ${key}; it will not be injected.`, "info");
+    ctx.ui.notify(`service_tier=${tier} support is unknown for ${key}; configured requests will still send it.`, "info");
     return;
   }
 
@@ -883,14 +904,14 @@ async function evaluateUnsupportedAfterExplicitCommand(ctx: ExtensionCommandCont
   );
   const paths = getPaths(ctx);
   if (choice === AGGRESSIVE_ONCE_CHOICE) {
-    await runAggressiveProbeForCurrentTier(ctx, key, tier);
+    startAggressiveProbeForCurrentTier(ctx, key, tier);
     return;
   }
   if (choice === AGGRESSIVE_ALWAYS_CHOICE) {
     setScopedUnknownModelBehavior(paths, "user", "aggressive");
     updateStatus(ctx);
     ctx.ui.notify(`user-global unknownModelBehavior set to aggressive; probing service_tier=${tier} for ${key} now.`, "warning");
-    await runAggressiveProbeForCurrentTier(ctx, key, tier);
+    startAggressiveProbeForCurrentTier(ctx, key, tier);
     return;
   }
   if (choice === LEAVE_ONCE_CHOICE) {
@@ -1148,7 +1169,7 @@ async function handleUnsetSupportAll(ctx: ExtensionCommandContext): Promise<void
   const paths = getPaths(ctx);
   clearMap(paths.map);
   updateStatus(ctx);
-  ctx.ui.notify("service_tier support map cleared; support is now unknown for all models.", "info");
+  ctx.ui.notify("service_tier support map cleared.", "info");
 }
 
 export default function piServiceTier(pi: ExtensionAPI): void {
@@ -1368,5 +1389,7 @@ export const _test = {
   refreshPresetMapEntry,
   refreshPresetKnowledgeForStoredEntries,
   runAggressiveProbeForCurrentTier,
+  startAggressiveProbeForCurrentTier,
   setProbeTierForTest,
+  waitForAggressiveProbesForTest,
 };

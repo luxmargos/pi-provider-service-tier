@@ -204,7 +204,7 @@ Commands apply only to the current provider/model pair. Argument completions are
 - `/service-tier-refresh-support` refreshes preset support for the current provider/model.
 - `/service-tier-refresh-support-all` refreshes preset support for all models returned by Pi's model registry.
 - `/service-tier-unset-support` removes the current provider/model from the support map, making support unknown.
-- `/service-tier-unset-support-all` clears the support map, making support unknown for all models.
+- `/service-tier-unset-support-all` clears the support map.
 
 Refresh commands are preset-only and do not call providers. Unset commands do not mark models unsupported.
 
@@ -230,7 +230,7 @@ Tier and fast commands preserve `source: "probe"` map entries when the requested
 
 In `ask` mode, the prompt is shown only when the map entry has `"determined": false` and `source` is not `"user-mark"`.
 
-`Use aggressive mode once` and `Use aggressive mode and do not ask again` immediately run low-token current-model probes for every known service tier and show progress notifications while the extension waits for provider results. A completed probe cycle writes one `source: "probe"` map entry with complete `tiers` and `unsupportedTiers`. If any tier cannot be determined, the support map is not overwritten with partial probe results. Failed probes are not retried.
+`Use aggressive mode once` and `Use aggressive mode and do not ask again` start low-token current-model probes for every known service tier in the background and show progress notifications while provider results arrive. Requests sent while probing is in progress are not queued by this extension; they use the current active configuration and current stored support state. A completed probe cycle writes one `source: "probe"` map entry with complete `tiers` and `unsupportedTiers`. If any tier cannot be determined, the support map is not overwritten with partial probe results. Failed probes are not retried.
 
 ### Debug injection decisions
 
