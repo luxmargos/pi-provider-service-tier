@@ -14,7 +14,7 @@ Use it when you want to turn on faster or paid priority tiers for one model with
 - Adds a top-level `service_tier` field to outgoing provider request payloads.
 - Scopes settings to the current `provider/model` pair.
 - Supports project-local settings and user-global defaults.
-- Provides simple `/fast-*` commands for `service_tier: "priority"`.
+- Provides simple `/service-tier-fast-*` commands for `service_tier: "priority"`.
 - Keeps a support map so unsupported provider/model pairs are not modified.
 - Detects unsupported tier errors and updates the support map.
 
@@ -22,7 +22,7 @@ The extension only injects `service_tier` when all of these are true:
 
 1. the current `provider/model` pair is active in the effective config,
 2. a service tier is configured for that pair, and
-3. the support map says that tier is supported for that pair.
+3. the support map says that tier is supported for that pair, or unsupported behavior explicitly authorizes an aggressive injection.
 
 > [!NOTE]
 > This extension injects the provider payload field `service_tier`. For Pi's built-in OpenAI providers, Pi also has an internal `serviceTier` stream option used for cost accounting. This extension is intentionally broader and payload-hook based, so it does not adjust Pi's internal cost multiplier.
@@ -46,8 +46,8 @@ Inside Pi:
 
 ```text
 /reload
-/fast-project on
-/fast-project status
+/service-tier-fast-project on
+/service-tier-fast-project status
 ```
 
 Use `pi install -l npm:pi-provider-service-tier` instead if you want a project-local install rather than a user-global install.
@@ -159,14 +159,16 @@ Fast mode is a convenience wrapper for enabling `service_tier: "priority"` for t
 
 | Command | Scope | Description |
 | --- | --- | --- |
-| `/fast-project` | Current project | Toggle priority tier for the current provider/model. |
-| `/fast-project on` | Current project | Enable priority tier. |
-| `/fast-project off` | Current project | Disable this extension for the current provider/model in this project. |
-| `/fast-project status` | Current project | Show the current project setting. |
-| `/fast-user` | User-global | Toggle priority tier for the current provider/model. |
-| `/fast-user on` | User-global | Enable priority tier as a user default. |
-| `/fast-user off` | User-global | Disable the user-global setting for the current provider/model. |
-| `/fast-user status` | User-global | Show the current user-global setting. |
+| `/service-tier-fast-project` | Current project | Toggle priority tier for the current provider/model. |
+| `/service-tier-fast-project on` | Current project | Enable priority tier. |
+| `/service-tier-fast-project off` | Current project | Disable this extension for the current provider/model in this project. |
+| `/service-tier-fast-project status` | Current project | Show the current project setting. |
+| `/service-tier-fast-user` | User-global | Toggle priority tier for the current provider/model. |
+| `/service-tier-fast-user on` | User-global | Enable priority tier as a user default. |
+| `/service-tier-fast-user off` | User-global | Disable the user-global setting for the current provider/model. |
+| `/service-tier-fast-user status` | User-global | Show the current user-global setting. |
+
+The older `/fast-project` and `/fast-user` commands remain available as aliases.
 
 ### Explicit service tiers
 
@@ -188,29 +190,41 @@ Examples:
 
 Commands apply only to the current provider/model pair. Argument completions are available; type a command plus a space, then press Tab.
 
-### Build or refresh the support map
+### Refresh or unset support
 
 ```text
-/service-tier-build-map
-/service-tier-build-map-all
+/service-tier-refresh-support
+/service-tier-refresh-support-all
+/service-tier-unset-support
+/service-tier-unset-support-all
 ```
 
-- `/service-tier-build-map` updates the support map for the current provider/model.
-- `/service-tier-build-map-all` updates the support map for all models returned by Pi's model registry.
+- `/service-tier-refresh-support` refreshes preset support for the current provider/model.
+- `/service-tier-refresh-support-all` refreshes preset support for all models returned by Pi's model registry.
+- `/service-tier-unset-support` removes the current provider/model from the support map, making support unknown.
+- `/service-tier-unset-support-all` clears the support map, making support unknown for all models.
 
-With aggressive probing off, map building uses bundled presets. With aggressive probing on, the extension sends low-token probe requests for each tier and model.
+Refresh commands are preset-only and do not call providers. Unset commands do not mark models unsupported.
 
-Toggle aggressive probing for the current project config:
+### Unsupported behavior
 
 ```text
-/service-tier-aggressive-probe
-/service-tier-aggressive-probe on
-/service-tier-aggressive-probe off
-/service-tier-aggressive-probe status
+/service-tier-unsupported-behavior ask
+/service-tier-unsupported-behavior aggressive
+/service-tier-unsupported-behavior unsupported
+/service-tier-unsupported-behavior status
 ```
 
-> [!WARNING]
-> Aggressive probing can cost money and trigger provider rate limits. It is off by default.
+`ask` is the default. When an explicit tier, fast, or refresh command selects a tier that stored support says is unsupported, Pi prompts with:
+
+- `Use aggressive mode once`
+- `Use aggressive mode and do not ask again`
+- `Leave unsupported once`
+- `Leave unsupported and do not ask again`
+
+`aggressive` injects the configured tier even when support is unknown or unsupported. `unsupported` leaves unknown or unsupported tiers uninjected. The command writes user-global config.
+
+`Use aggressive mode once` authorizes one request and records the observed result in the user-global support map. A successful assistant response marks the tier supported; an unsupported `service_tier` provider error marks it unsupported. The failed request is not retried.
 
 ### Debug injection decisions
 
@@ -258,8 +272,8 @@ Example:
 
 ```json
 {
-  "version": 1,
-  "aggressiveProbe": false,
+  "version": 2,
+  "unsupportedModelBehavior": "ask",
   "entries": {
     "openai/gpt-5.5": {
       "active": true,
@@ -273,7 +287,7 @@ Example:
 }
 ```
 
-`aggressiveProbe` defaults to `false`. Use `/service-tier-aggressive-probe [on|off|status]` to manage the project config, or set it manually in either config file. Project config overrides user config for this field.
+`unsupportedModelBehavior` is optional and defaults to `ask`. Valid values are `ask`, `aggressive`, and `unsupported`. Use `/service-tier-unsupported-behavior [ask|aggressive|unsupported|status]` to manage the user-global setting, or set it manually in either config file. Project config overrides user config for this field.
 
 ## Support map schema
 
@@ -281,7 +295,7 @@ Example:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "entries": {
     "openai/gpt-5.5": {
       "provider": "openai",
@@ -306,7 +320,7 @@ Preset support currently includes:
 | `openai-codex` + `openai-codex-responses` | fallback for other models | `priority` |
 | `opencode-go` + `openai-completions` | probed models in `presets/opencode-go.json` | model-specific; usually `priority`, `flex`, `default`, `auto`, `scale` |
 
-Other providers/models are marked unsupported by presets until aggressive probing or future presets add support.
+Other providers/models remain unknown unless refreshed from presets, learned from an unsupported provider error, or updated by an aggressive-once result.
 
 ## Unsupported tier errors
 
