@@ -24,6 +24,8 @@
   },
   "scripts": {
     "bench:service-tier": "node scripts/benchmark-service-tier.mjs",
+    "bench:service-tier:quick": "PST_BENCH_ROUNDS=1 PST_BENCH_WARMUPS=0 node scripts/benchmark-service-tier.mjs",
+    "bench:service-tier:stress": "PST_BENCH_ROUNDS=5 PST_BENCH_WARMUPS=1 PST_BENCH_THINKING=high node scripts/benchmark-service-tier.mjs",
     "bench:service-tier:swap": "PST_BENCH_START_WITH=tier node scripts/benchmark-service-tier.mjs",
     "check": "npm run typecheck && npm test && npm run pack:dry-run",
     "pack:dry-run": "npm pack --dry-run",

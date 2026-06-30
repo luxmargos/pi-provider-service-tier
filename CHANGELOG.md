@@ -2,6 +2,12 @@
 
 Notable changes to this package are documented here.
 
+## Unreleased
+
+### Changed
+
+- Expanded the latency benchmark into paired warmup/measured runs with alternating order, first-output timing, paired deltas, win counts, practical-threshold interpretation, and quick/stress npm scripts.
+
 ## [0.1.7] - 2026-06-29
 
 ### Added

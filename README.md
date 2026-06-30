@@ -375,20 +375,24 @@ pi -e . --provider openai --model gpt-5.5
 Real latency comparison against Pi and your provider account:
 
 ```bash
-npm run bench:service-tier
-npm run bench:service-tier:swap # run priority before baseline in the first round
+npm run bench:service-tier       # paired benchmark: 1 warmup pair + 3 measured pairs
+npm run bench:service-tier:quick # old-style short check: 1 measured pair, no warmup
+npm run bench:service-tier:stress
+npm run bench:service-tier:swap  # run priority before baseline in the first pair
 ```
 
-The benchmark loads this checkout for both runs with global extension discovery disabled, then compares one Pi `--print` completion with the project setting off against one with `service_tier: "priority"` on. It also inspects the user-global service-tier config and reports whether the target model already has priority enabled globally; the baseline still writes a project-local `active:false` override before Pi starts. It defaults to `openai-codex/gpt-5.5` and a no-tools prompt sized to make elapsed time measurable. This makes real provider calls and may cost money.
+The benchmark loads this checkout for every run with global extension discovery disabled, then compares paired Pi `--print` completions with the project setting off against completions with `service_tier: "priority"` on. It alternates pair order to reduce time-of-run bias, records both first-output latency and total completion latency, prints paired deltas/win counts, and classifies whether the observed difference clears a practical threshold. It also inspects the user-global service-tier config and reports whether the target model already has priority enabled globally; the baseline still writes a project-local `active:false` override before Pi starts. It defaults to `openai-codex/gpt-5.5` and a no-tools prompt sized to make elapsed time measurable. This makes real provider calls and may cost money.
 
 Useful overrides:
 
 ```bash
 PST_BENCH_MODEL=openai-codex/gpt-5.5 npm run bench:service-tier
 PST_BENCH_START_WITH=tier npm run bench:service-tier
-PST_BENCH_ROUNDS=3 PST_BENCH_THINKING=high npm run bench:service-tier
+PST_BENCH_ROUNDS=5 PST_BENCH_WARMUPS=1 PST_BENCH_THINKING=high npm run bench:service-tier
 PST_BENCH_PROMPT_FILE=./my-benchmark-prompt.md npm run bench:service-tier
 PST_BENCH_MIN_CHARS=0 npm run bench:service-tier # disable minimum-output validation
+PST_BENCH_PROGRESS_MS=0 npm run bench:service-tier # disable per-run progress updates
+PST_BENCH_PRACTICAL_DELTA_MS=1000 PST_BENCH_PRACTICAL_DELTA_PCT=10 npm run bench:service-tier
 PST_BENCH_TIER=default npm run bench:service-tier
 ```
 
