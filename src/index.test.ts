@@ -656,7 +656,7 @@ test("status-format command creates only an explicitly saved user config and kee
   const harness = createExtensionHarness(cwd, home);
   try {
     const command = harness.commands.get("service-tier-status-format")!;
-    for (const arg of ["", "status", "reset", "{bad}", '"unclosed', "a\nb"]) {
+    for (const arg of ["", "status", "reset", "{bad}", '"unclosed', "a\nb", '{"\\n"support}', '{" | "unknown}']) {
       await command.handler(arg, harness.ctx);
       assert.deepEqual(Object.values(paths).map(path => existsSync(path)), [false, false, false]);
     }
@@ -674,6 +674,50 @@ test("status-format command creates only an explicitly saved user config and kee
     assert.equal(Object.hasOwn(readConfig(paths.user)!, "statusFormat"), false);
     assert.equal(harness.statuses.at(-1)?.value, "service_tier: ○ off");
     assert.equal(harness.prompts.length, 0); assert.equal(existsSync(paths.map), false);
+  } finally { harness.restore(); rmSync(cwd, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }); }
+});
+
+test("conditional formats save directly or JSON-quoted without rewriting legacy settings or support", async () => {
+  const cwd = tempDir(); const home = tempDir(); const paths = configPaths(cwd, home);
+  const harness = createExtensionHarness(cwd, home);
+  try {
+    const original: ConfigFile = {
+      version: 2, unknownModelBehavior: "auto-probe", custom: "keep",
+      statusFormat: "{tier} | {support} | {fallback}",
+      entries: { [modelKey(openAIModel)!]: { active: true, serviceTier: "priority" } },
+    };
+    writeConfig(paths.user, original);
+    writeMap(paths.map, pickerFixtureMap());
+    const legacyBytes = readFileSync(paths.user, "utf8");
+    await harness.handlers.get("session_start")?.({} as never, harness.ctx);
+    assert.equal(readFileSync(paths.user, "utf8"), legacyBytes);
+    const mapBytes = readFileSync(paths.map, "utf8");
+    const command = harness.commands.get("service-tier-status-format")!;
+    const format = 'Tier: {symbol} {tier}{" | "support}{" → "fallback}';
+    for (const arg of [format, JSON.stringify(format)]) {
+      await command.handler(arg, harness.ctx);
+      assert.deepEqual(readConfig(paths.user), { ...original, statusFormat: format });
+      assert.equal(harness.statuses.at(-1)?.value, "Tier: ⚡ priority | fallback → default");
+      assert.equal(existsSync(paths.project), false);
+      assert.equal(readFileSync(paths.map, "utf8"), mapBytes);
+    }
+    const savedBytes = readFileSync(paths.user, "utf8");
+    for (const arg of ['{"\\n"support}', '{" | "unknown}']) {
+      await command.handler(arg, harness.ctx);
+      assert.equal(readFileSync(paths.user, "utf8"), savedBytes);
+    }
+    writeConfig(paths.user, { ...readConfig(paths.user), entries: { [modelKey(openAIModel)!]: { active: false, serviceTier: "priority" } } });
+    const payload = { model: "fixture", service_tier: "default" };
+    assert.equal(await harness.handlers.get("before_provider_request")?.({ payload } as never, harness.ctx), undefined);
+    assert.equal(harness.statuses.at(-1)?.value, "Tier: ○ off");
+    assert.deepEqual(payload, { model: "fixture", service_tier: "default" });
+    setScopedStatusFormat(paths, "project", 'Project: {tier}{" | "support}');
+    const projectBytes = readFileSync(paths.project, "utf8");
+    await command.handler(format, harness.ctx);
+    assert.equal(harness.statuses.at(-1)?.value, "Project: off");
+    assert.equal(readFileSync(paths.project, "utf8"), projectBytes);
+    assert.equal(readFileSync(paths.map, "utf8"), mapBytes);
+    assert.equal(harness.prompts.length, 0);
   } finally { harness.restore(); rmSync(cwd, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }); }
 });
 
@@ -717,14 +761,14 @@ test("status presets wrap user formats, preserve settings/evidence and respect p
     assert.ok(harness.notifications.some(({ message, type }) => type === "error" && message.includes("minimal (default) saves the default template")));
     for (const line of [
       "minimal (default): {label}: {symbol} {tier}",
-      "medium: {label}: {symbol} {tier} | {support}",
-      "long: {label}: {symbol} {tier} | {support} | {fallback}",
+      'medium: {label}: {symbol} {tier}{" | "support}',
+      'long: {label}: {symbol} {tier}{" | "support}{" → "fallback}',
     ]) {
       assert.ok(harness.notifications.some(({ message }) => message.split("\n").includes(line)), line);
     }
     await command.handler("long", harness.ctx);
-    assert.equal(readConfig(paths.user)?.statusFormat, "{label}: {symbol} {tier} | {support} | {fallback}");
-    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ○ off |  | ");
+    assert.equal(readConfig(paths.user)?.statusFormat, '{label}: {symbol} {tier}{" | "support}{" → "fallback}');
+    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ○ off");
     assert.equal(existsSync(paths.project), false); assert.equal(existsSync(paths.map), false);
     const original: ConfigFile = {
       version: 2, unknownModelBehavior: "auto-probe", custom: "keep",
@@ -735,8 +779,8 @@ test("status presets wrap user formats, preserve settings/evidence and respect p
     const mapBytes = readFileSync(paths.map, "utf8");
     for (const [preset, format, text] of [
       ["minimal", "{label}: {symbol} {tier}", "service_tier: ⚡ priority"],
-      ["medium", "{label}: {symbol} {tier} | {support}", "service_tier: ⚡ priority | fallback"],
-      ["long", "{label}: {symbol} {tier} | {support} | {fallback}", "service_tier: ⚡ priority | fallback | default"],
+      ["medium", '{label}: {symbol} {tier}{" | "support}', "service_tier: ⚡ priority | fallback"],
+      ["long", '{label}: {symbol} {tier}{" | "support}{" → "fallback}', "service_tier: ⚡ priority | fallback → default"],
     ] as const) {
       await command.handler(preset, harness.ctx);
       assert.deepEqual(readConfig(paths.user), { ...original, statusFormat: format });
@@ -770,7 +814,7 @@ test("invalid statusFormat files fail closed without reviving another scope or h
   try {
     writeConfig(paths.user, { statusFormat: "", entries: { [modelKey(openAIModel)!]: { active: true, serviceTier: "priority" } } });
     mkdirSync(dirname(paths.project), { recursive: true });
-    for (const value of [null, 3, "{unknown}", "{tier", "\u001b[31m", "line\nbreak", "x".repeat(257)]) {
+    for (const value of [null, 3, "{unknown}", "{tier", "\u001b[31m", "line\nbreak", "x".repeat(257), '{"\\u001b"support}', '{"\\q"support}', '{" | "unknown}']) {
       const bytes = JSON.stringify({ version: 2, statusFormat: value, custom: "private-format-marker", entries: {} });
       writeFileSync(paths.project, bytes);
       await harness.handlers.get("session_start")?.({} as never, harness.ctx);
@@ -2811,7 +2855,7 @@ test("same-key API switches do not reuse support or user marks, and commands pre
     const original = readMap(paths.map)!.entries![key].routes["openai-responses"]?.auth.api_key;
     harness.setModel(alternate);
     await harness.handlers.get("model_select")?.({} as never, harness.ctx);
-    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | unknown | ");
+    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | unknown");
     assert.equal(mapSupportsTier(readMap(paths.map), key, "priority", alternate), false);
     assert.deepEqual(await harness.handlers.get("before_provider_request")?.({ payload: {} } as never, harness.ctx), { service_tier: "priority" });
     harness.selections.push("Leave unknown once");
@@ -2859,7 +2903,7 @@ test("a malformed support map preserves bytes without disabling healthy explicit
     writeFileSync(paths.map, broken);
     await harness.handlers.get("session_start")?.({} as never, harness.ctx);
     assert.deepEqual(await harness.handlers.get("before_provider_request")?.({ payload: {} } as never, harness.ctx), { service_tier: "priority" });
-    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | unknown | ");
+    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | unknown");
     await harness.commands.get("service-tier-unset-support")?.handler("", harness.ctx);
     assert.equal(readFileSync(paths.map, "utf8"), broken);
     assert.ok(harness.notifications.every(({ message }) => !message.includes("private-map-content")));
@@ -2867,7 +2911,7 @@ test("a malformed support map preserves bytes without disabling healthy explicit
     await harness.handlers.get("before_provider_request")?.({ payload: {} } as never, harness.ctx);
     writeFileSync(paths.map, JSON.stringify(putRoute({ entries: {} }, manualEntry(openAIModel))));
     assert.deepEqual(await harness.handlers.get("before_provider_request")?.({ payload: {} } as never, harness.ctx), { service_tier: "priority" });
-    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | manual | ");
+    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | manual");
   } finally {
     harness.restore(); rmSync(cwd, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true });
   }
@@ -2947,7 +2991,7 @@ test("real probe instrumentation saves completion/fallback separately without fa
       assert.equal(entry.observations?.flex?.kind, servedTier ? "fallback" : "request-completed");
       assert.equal(mapSupportsTier(readMap(paths.map), modelKey(unknownRouterModel), "flex", unknownRouterModel), false);
       assert.deepEqual(entry.tiers, servedTier ? ["default"] : []);
-      assert.equal(harness.statuses.at(-1)?.value, servedTier ? "service_tier: ● flex | fallback | default" : "service_tier: ● flex | probe-completed (tier unknown) | ");
+      assert.equal(harness.statuses.at(-1)?.value, servedTier ? "service_tier: ● flex | fallback → default" : "service_tier: ● flex | probe-completed (tier unknown)");
       assert.deepEqual(await harness.handlers.get("before_provider_request")?.({ payload: {} } as never, harness.ctx), { service_tier: "flex" });
     } finally {
       await _test.waitForAutoProbesForTest(); harness.restore(); rmSync(cwd, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true });
@@ -3094,7 +3138,7 @@ for (const initialAuth of ["oauth", "api_key"] as const) {
       const payload = { model: "gpt-5.5", service_tier: "default" };
       assert.deepEqual(await harness.handlers.get("before_provider_request")?.({ payload } as never, harness.ctx), { model: "gpt-5.5", service_tier: "priority" });
       assert.deepEqual(payload, { model: "gpt-5.5", service_tier: "default" });
-      assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | unknown | ");
+      assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | unknown");
       let notices = harness.notifications.filter(({ message }) => message.startsWith("[pi-provider-service-tier] Authentication changed"));
       assert.equal(notices.length, 1);
       assert.equal(notices[0].type, "warning");
@@ -3125,7 +3169,7 @@ test("auth switches use existing records for the new mode rather than mixing obs
     assert.ok(harness.statuses.at(-1)?.value?.includes("probe-verified"));
     harness.setAuthMode("oauth");
     await harness.handlers.get("model_select")?.({} as never, harness.ctx);
-    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | fallback | default");
+    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | fallback → default");
     await harness.commands.get("service-tier-project")?.handler("status", harness.ctx);
     assert.ok(harness.notifications.at(-1)?.message.includes("openai-responses, oauth"));
     assert.deepEqual(readMap(paths.map), map);
@@ -3146,7 +3190,7 @@ test("historical v3 probe/manual facts migrate to unknown auth without modifying
     assert.equal(auth.api_key, undefined); assert.equal(auth.oauth, undefined);
     assert.equal(auth.unknown?.observations?.priority?.kind, "verified");
     assert.deepEqual(auth.unknown?.tiers, MANUAL_TEST_TIERS);
-    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | unknown | ");
+    assert.equal(harness.statuses.at(-1)?.value, "service_tier: ⚡ priority | unknown");
     assert.equal(readFileSync(paths.user, "utf8"), configBytes);
     assert.deepEqual(await harness.handlers.get("before_provider_request")?.({ payload: {} } as never, harness.ctx), { service_tier: "priority" });
   } finally { harness.restore(); rmSync(cwd, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }); }

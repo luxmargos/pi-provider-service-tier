@@ -6,6 +6,7 @@ Notable changes to this package are documented here.
 
 ### Added
 
+- Added quoted conditional prefix tokens such as `{" | "support}` and `{" → "fallback}`. Render the prefix only with a nonempty sanitized segment; validate JSON escapes and reject decoded controls while preserving ordinary tokens and literal brace escaping.
 - Added `/service-tier-status-preset minimal|medium|long` as a user-format wrapper with argument completion; all presets save explicit templates, and minimal is shared with the default formatter. Label minimal as `minimal (default)` while preserving its raw insertion value. Added `{fallback}` for the saved reported fallback tier, empty in other states.
 - Added an opt-in `PST_BENCH_WORKLOAD=fixed` exact-sequence task for supplementary output-controlled comparisons; existing benchmark profiles, default model/workloads and call budgets are unchanged.
 - Added `bench:service-tier:stress:light`: two alternating measured pairs, no warmup, medium thinking, and a shorter memo with a 2,500-character minimum (four Pi completions rather than stress's twelve).
@@ -16,8 +17,9 @@ Notable changes to this package are documented here.
 
 ### Changed
 
+- Use conditional evidence prefixes in medium/long footer presets to hide empty separators: ` | ` before support and ` → ` before the reported fallback tier. Minimal remains the default; existing saved templates keep their literal behavior until explicitly changed or a preset is reapplied.
 - Include the `service_tier:` label in the minimal and medium footer presets, matching long. Existing saved/custom formats and project precedence remain unchanged; reapply a preset to save its updated template.
-- Use the minimal template (`{label}: {symbol} {tier}`) for normal footer status when no format is configured; existing saved formats remain unchanged. In evidence-enabled templates, show `fallback` in `{support}` and expose the reported tier separately through `{fallback}`. Templates replace the entire normal footer, allowing a custom or omitted `service_tier:` prefix, while separators remain literal text even beside empty segments.
+- Use the minimal template (`{label}: {symbol} {tier}`) for normal footer status when no format is configured; existing saved formats remain unchanged. In evidence-enabled templates, show `fallback` in `{support}` and expose the reported tier separately through `{fallback}`. Templates replace the entire normal footer, allowing a custom or omitted `service_tier:` prefix, while separators outside conditional tokens remain literal text even beside empty segments.
 - Harden benchmark evidence with a benchmark-only Pi observer: distinguish prepared payload tier/effort/cap, actual runtime versions, HTTP response callbacks, streaming text, normal completion, usage and reported tier without treating hooks as a wire capture or saving observations/rejections as support evidence. Stop missing/inconsistent or changed-scope measurements, additional preparations, invalid output and failures without retry/replacement cases; stop cache warming and use temporary leave-unknown policy.
 - Use identical prompts/scenario/nonces within each benchmark pair, report paired dispersion, separate streaming/total win counts, order splits, output/cache/reasoning workload and exploratory bootstrap uncertainty. Interpret the practical threshold using paired mean total CLI time only, retain `generationMs` as a deprecated residual-time alias, and remove generated-output/stderr tails from reports.
 - Prefix tier selection and argument-completion labels for `/service-tier-project` and `/service-tier-user` with `service_tier: `, excluding off/status and preserving raw insertion values and extension-name-free option labels.

@@ -53,7 +53,7 @@ Add this field to your existing user/project JSON **without replacing its other 
 ```json
 {
   "version": 2,
-  "statusFormat": "{symbol} {tier} | {support}",
+  "statusFormat": "{symbol} {tier}{\" | \"support}",
   "entries": {}
 }
 ```
@@ -69,13 +69,31 @@ Add this field to your existing user/project JSON **without replacing its other 
 Templates are single-line strings up to 256 characters. Escape literal braces as `{{` and `}}`; unknown/unmatched placeholders, terminal controls and newlines are invalid config. This is text substitution, not executable code. Replacements are non-recursive; inserted values are control-sanitized and bounded. Literal spacing is preserved. An empty/whitespace-only template hides normal footer status.
 
 ```text
-/service-tier-status-format {symbol} {tier} | {support}
-/service-tier-status-format Tier: {symbol} {tier} | {support} | {fallback}
+/service-tier-status-format {symbol} {tier}{" | "support}
+/service-tier-status-format Tier: {symbol} {tier}{" | "support}{" → "fallback}
 /service-tier-status-format status
 /service-tier-status-format reset
 ```
 
-To rename the prefix, replace `{label}:` with literal text such as `Tier:`; omitting it removes the prefix. For example, `Tier: {symbol} {tier} | {support} | {fallback}` renders `Tier: ⚡ priority | fallback | default` for an active priority tier with saved fallback-to-default evidence. `{support}` supplies only `fallback`, and `{fallback}` supplies `default`. Omit ` | {fallback}` to hide the reported tier, or omit both evidence segments for a shorter display. Separators remain literal even when a segment is empty; there is no conditional template syntax. For example, `long` with no fallback ends in ` | `, and when off it renders `service_tier: ○ off |  | `.
+To rename the prefix, replace `{label}:` with literal text such as `Tier:`; omitting it removes the prefix. For example, `Tier: {symbol} {tier}{" | "support}{" → "fallback}` renders `Tier: ⚡ priority | fallback → default` for an active priority tier with saved fallback-to-default evidence. `{support}` supplies only `fallback`, and `{fallback}` supplies `default`. Omit `{" → "fallback}` to hide the reported tier, or omit both evidence segments for a shorter display.
+
+### Conditional prefixes
+
+Use `{"<prefix>"token}` to show the prefix and token together only when that segment is nonempty. Put any desired spaces **inside** the quotes:
+
+```text
+{label}: {symbol} {tier}{" | "support}{" → "fallback}
+```
+
+| Saved state | Rendered example |
+| --- | --- |
+| Fallback to default | `service_tier: ⚡ priority \| fallback → default` |
+| Manual evidence, no fallback | `service_tier: ⚡ priority \| manual` |
+| Off (both evidence segments empty) | `service_tier: ○ off` |
+
+The prefix is a JSON string, so `\"` and `\\` escape a quote and backslash; decoded controls/newlines are invalid. This syntax works with any listed token, not just support/fallback. Empty or whitespace-only values after control sanitization and the 128-character segment limit omit the entire conditional token. Prefixes and inserted segment text are literal and never recursively formatted; braces inside a quoted prefix are literal. Outside quoted prefixes, keep using `{{` and `}}` for literal braces. The alternative `{|:support}` form and nested expressions are not supported.
+
+Ordinary tokens and surrounding text are unchanged: `{tier} | {support}` still keeps ` | ` when support is empty. Use `{tier}{" | "support}` to make that separator conditional instead. Medium/long presets use conditional prefixes, so long without fallback has no trailing separator and off has no evidence separators.
 
 ### Length presets
 
@@ -84,8 +102,8 @@ To rename the prefix, replace `{label}:` with literal text such as `Tier:`; omit
 | Preset | Equivalent `/service-tier-status-format` argument | Example with saved fallback evidence |
 | --- | --- | --- |
 | `minimal` (default) | `{label}: {symbol} {tier}` | `service_tier: ⚡ priority` |
-| `medium` | `{label}: {symbol} {tier} \| {support}` | `service_tier: ⚡ priority \| fallback` |
-| `long` | `{label}: {symbol} {tier} \| {support} \| {fallback}` | `service_tier: ⚡ priority \| fallback \| default` |
+| `medium` | `{label}: {symbol} {tier}{" \| "support}` | `service_tier: ⚡ priority \| fallback` |
+| `long` | `{label}: {symbol} {tier}{" \| "support}{" → "fallback}` | `service_tier: ⚡ priority \| fallback → default` |
 
 ```text
 /service-tier-status-preset minimal
@@ -96,7 +114,7 @@ To rename the prefix, replace `{label}:` with literal text such as `Tier:`; omit
 
 No argument or `status` shows the effective format and all preset templates without saving. Completion labels show `minimal (default)` but insert the raw `minimal` argument. Every preset explicitly saves its template in user settings, creating the file if missing; it does not remove a project override. An absent `statusFormat` renders through the minimal template without creating a default property/file. Use `/service-tier-status-format reset` to remove the user override and return to minimal unless a project format takes precedence. Presets store no separate setting and do not change tiers, support records, or Probe policy.
 
-Existing saved templates are not rewritten automatically; reapply `minimal` or `medium` to add the label to an older preset template. Custom formats can still omit `{label}:` to hide the prefix.
+Existing saved templates are not rewritten automatically. Reapply a preset to adopt its latest template, including conditional separators in `medium`/`long` and labels in older minimal/medium formats. Custom formats can still omit `{label}:` to hide the prefix.
 
 Both commands write the **user** scope; a project override still takes precedence. A valid explicit save creates the user JSON if missing, without creating a project file or initializing/migrating support records. Status, invalid input, and reset with no stored override do not create settings files. The format command also accepts JSON-quoted templates; `""` hides the normal footer and `reset` removes only the user property, preserving other data and files.
 

@@ -1078,8 +1078,9 @@ async function handleStatusFormatCommand(args: string, ctx: ExtensionCommandCont
       `User file: ${paths.user}. Project overrides take precedence.`,
       `Tokens: ${STATUS_FORMAT_TOKENS.map(token => `{${token}}`).join(", ")}.`,
       "The template replaces the entire footer, including service_tier:. Use literal text instead of {label}: to change the prefix, for example:",
-      "/service-tier-status-format Tier: {symbol} {tier} | {support} | {fallback}",
-      "{support} shows fallback for a tier mismatch; {fallback} shows the reported tier (empty otherwise). Separators such as | are literal text.",
+      '/service-tier-status-format Tier: {symbol} {tier}{" | "support}{" → "fallback}',
+      "{support} shows fallback for a tier mismatch; {fallback} shows the reported tier (empty otherwise).",
+      'Use {" | "support} or {" → "fallback} to show a prefix only with a nonempty segment. Put spaces inside the quotes; separators outside tokens remain literal.',
       "Presets: /service-tier-status-preset <preset>",
       ...Object.entries(STATUS_FORMAT_PRESETS).map(([name, template]) => `${statusPresetLabel(name)}: ${template}`),
     ].join("\n"), "info");
@@ -1093,7 +1094,7 @@ async function handleStatusFormatCommand(args: string, ctx: ExtensionCommandCont
       catch { value = undefined; }
     }
     if (!isStatusFormat(value)) {
-      notify(ctx, "Invalid statusFormat. Use a single-line template up to 256 characters with {label}, {symbol}, {tier}, {support}, {fallback}; escape literal braces as {{ and }}. Use reset to remove the user override.", "error");
+      notify(ctx, 'Invalid statusFormat. Use a single-line template up to 256 characters with {label}, {symbol}, {tier}, {support}, {fallback}; optional prefixes use {" | "support}. Prefixes are JSON strings without controls; escape literal braces outside prefixes as {{ and }}. Use reset to remove the user override.', "error");
       return;
     }
     format = value;
